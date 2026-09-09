@@ -40,6 +40,9 @@ from .backend.logging_setup import shutdown_logging
 from .shell import chrome, commands, handoff
 from .shell.subheader import SubHeader
 from .splash import LaunchSplash
+from .views.base import StandaloneCtx
+from .views.host import ViewHost
+from .views.list_view import CARD_BUILD_INTERVAL_MS, INITIAL_CARDS, ListView
 from .widgets.add_device import AddDeviceButton
 from .widgets.device_card import DeviceCard
 from .widgets.dialogs import ConfirmDialog, ErrorReporter
@@ -51,10 +54,6 @@ logger = logging.getLogger("emcc.app")
 #: devices the backend produces ~25 events/s (temperature is throttled to 1 Hz
 #: per device), so a tick typically has two or three events to apply.
 PUMP_INTERVAL_MS = 100
-
-#: Cards built before the window is shown. Enough to fill the viewport at the
-#: default window height (142px card + 12px gap); the rest stream in on idle.
-INITIAL_CARDS = 5
 
 #: Attributes that `tests/` and `tools/visual_pass.py` reach on `App` from
 #: outside, minus the seven that resolve on `customtkinter.CTk` and so never
@@ -76,12 +75,6 @@ _FACADE_NAMES: frozenset[str] = frozenset({
     "_scroll_to_end", "_shutting_down", "_toggle_auto",
     "config_manager", "manager", "pulse", "shutdown", "title_bar"
 })
-
-#: Gap between streamed cards. A timer, not `after_idle`: a single
-#: `update_idletasks()` drains an entire after_idle chain, because each
-#: callback re-queues before the queue is checked again -- which silently
-#: turns the progressive build back into a blocking one.
-CARD_BUILD_INTERVAL_MS = 1
 
 
 class App(ctk.CTk):
@@ -121,9 +114,19 @@ class App(ctk.CTk):
         )
         self.manager.on_device_changed = self._render_device
 
-        self._cards: dict[str, DeviceCard] = {}
-        self._order: list[str] = []
+        #: Set by the `list` factory before the host sends `set_devices`,
+        #: which is what makes the facade properties below safe during
+        #: construction -- see the wiring-order rule in VIEW_CONTRACT.md.
+        self._list_view: ListView | None = None
         self._offsets: dict[bool, float] = {}
+        # Chrome state for `_refresh_chrome` and `_set_scrollbar_visible`,
+        # which stay in the shell until slice 4. Initialised here rather than
+        # where the list is built, because `_refresh_chrome` runs during the
+        # view's first `set_devices` and would otherwise read them before they
+        # existed. `_scrollbar_visible` starts True because
+        # CTkScrollableFrame grids its scrollbar by default.
+        self._hint_shown = False
+        self._scrollbar_visible = True
         #: Variants with a measurement already queued, so a card that
         #: re-renders before it lands cannot pile up callbacks.
         self._measuring: set[bool] = set()
@@ -131,8 +134,6 @@ class App(ctk.CTk):
         self._maximised = False
         self._shutting_down = False
         self._pump_job: str | None = None
-        self._build_job: str | None = None
-        self._pending_devices: list[DeviceState] = []
         self._errors = ErrorReporter(self)
         self._splash: LaunchSplash | None = None
         self._splash_job: str | None = None
@@ -152,8 +153,7 @@ class App(ctk.CTk):
         self.title_bar.pack(fill="x")
 
         self._build_subheader()
-        self._build_list()
-        self._rebuild()
+        self._build_views()
 
         # Alt+F4 and any OS-level close must run the same teardown as the
         # traffic light, or shutdown is silently skipped.
@@ -207,37 +207,112 @@ class App(ctk.CTk):
     # Device list
     # ------------------------------------------------------------------
 
-    def _build_list(self) -> None:
-        """flex-1 px-8 py-4 flex flex-col gap-3, scrolling past the threshold."""
-        self._list = ctk.CTkScrollableFrame(
-            self,
-            fg_color="transparent",
-            corner_radius=0,
-            scrollbar_button_color=theme.SCROLL_THUMB,
-            scrollbar_button_hover_color=theme.SCROLL_THUMB_HOVER,
-            scrollbar_fg_color="transparent",
+    def _build_views(self) -> None:
+        """Register the views and show the list.
+
+        The host packs `view.widget` straight into `self`, so the scroll frame
+        keeps the master it had before this extraction and its Tk pathname
+        does not move. Registration constructs nothing; the factory below runs
+        inside `show`.
+        """
+        self.views = ViewHost(self, StandaloneCtx(self))
+        self.views.register("list", self._make_list_view)
+        self.views.show("list", self.manager.devices)
+
+    def _make_list_view(self, parent, ctx) -> ListView:
+        """Build the list view, assigning `_list_view` before the host uses it.
+
+        The assignment happens here rather than after `show` returns because
+        the host calls `set_devices` -> `rebuild` -> `_refresh_chrome`, and
+        `_refresh_chrome` reaches `self._hint`, which is a facade property
+        backed by this view. Wiring order first, per VIEW_CONTRACT.md; the
+        `RuntimeError` in each property is only the backstop.
+        """
+        self._list_view = ListView(
+            parent, ctx,
+            manager=self.manager,
+            pulse=self.pulse,
+            offsets=self._offsets,
+            devices=self.manager.devices,
+            on_add=self._add_device,
+            on_connect=self._connect_device,
+            on_clean=self._clean_device,
+            on_auto=self._toggle_auto,
+            on_temperature=self._open_temperature,
+            on_remove=self._confirm_remove,
+            on_rename=self.manager.rename_device,
+            on_ip_change=self.manager.set_ip,
+            on_changed=self._refresh_chrome,
+            is_shutting_down=lambda: self._shutting_down,
         )
-        self._list.pack(fill="both", expand=True,
-                        padx=theme.PAGE_PAD_X - 8, pady=theme.PAGE_PAD_Y)
+        return self._list_view
 
-        # .device-scroll is 5px wide; CTkScrollbar defaults to 16 and stops
-        # rendering a usable thumb below ~8, so 8 is the closest faithful value.
-        bar = getattr(self._list, "_scrollbar", None)
-        if bar is not None:
-            bar.configure(width=8)
+    # ------------------------------------------------------------------
+    # Facade properties over the list view
+    #
+    # Every name here is in `_FACADE_NAMES`: 174 call sites outside `emcc/`
+    # reach them and are not being rewritten. Each returns the view's own
+    # object rather than a copy, so `app._cards[id] = card` and every identity
+    # comparison keep working -- `test_facade_containers_keep_identity_and_
+    # write_through` is the guard, and a copy-returning getter is the mutation
+    # that proves it bites.
+    #
+    # `RuntimeError`, never `AttributeError`: an `AttributeError` raised inside
+    # a property is swallowed by Python's attribute machinery and routed to
+    # `__getattr__`, which would report a *missing* facade attribute and blame
+    # the modularisation for what is really an unwired collaborator. See
+    # VIEW_CONTRACT.md:151. With the wiring order above correct this never
+    # fires.
+    # ------------------------------------------------------------------
 
-        # The add button and the scroll hint are created ONCE and stay put --
-        # new cards are inserted before the button. Recreating them per add is
-        # what made adding a device redraw the entire list.
-        self._add_button = AddDeviceButton(self._list, on_click=self._add_device)
-        self._add_button.pack(fill="x", pady=(theme.CARD_GAP + 4, 0))
+    def _view(self) -> ListView:
+        # `__dict__.get`, not `self._list_view`: on a bare instance built with
+        # `__new__` and no `__init__` -- which is exactly how the backstop is
+        # asserted -- the attribute is *absent*, so reading it would go to
+        # `__getattr__`, hit Tk delegation, and raise `AttributeError` instead
+        # of the `RuntimeError` the contract requires.
+        view = self.__dict__.get("_list_view")
+        if view is None:
+            raise RuntimeError(
+                "App._list_view is not wired yet: a facade property was read "
+                "before _build_views() ran. This is an ordering bug in "
+                "App.__init__, not a lost facade attribute."
+            )
+        return view
 
-        self._hint = ctk.CTkLabel(
-            self._list, text="", font=fonts.sans(10.5),
-            text_color=theme.TEXT_SCROLL_HINT, height=14,
-        )
-        self._hint_shown = False
-        self._scrollbar_visible = True   # CTkScrollableFrame grids it by default
+    @property
+    def _list(self):
+        return self._view().widget
+
+    @property
+    def _cards(self):
+        return self._view().cards
+
+    @property
+    def _order(self):
+        return self._view().order
+
+    @property
+    def _hint(self):
+        return self._view().hint
+
+    @property
+    def _add_button(self):
+        return self._view().add_button
+
+    @property
+    def _pending_devices(self):
+        return self._view().pending_devices
+
+    @_pending_devices.setter
+    def _pending_devices(self, devices) -> None:
+        # Write *through* rather than rebinding: the list object stays the same
+        # one the view holds, so a caller that kept a reference still sees the
+        # change. `shutdown` and the progressive-build tests both assign here.
+        self._view().pending_devices[:] = list(devices)
+
+    def _build_remaining(self) -> None:
+        self._view().build_remaining()
 
     def __getattr__(self, name: str):
         """Keep a lost facade attribute from being reported as a Tcl error.
@@ -286,103 +361,6 @@ class App(ctk.CTk):
         else:
             bar.grid_remove()
         self._scrollbar_visible = visible
-
-    def _new_card(self, device: DeviceState, first: bool,
-                  label_offset: float | None = None) -> DeviceCard:
-        card = DeviceCard(
-            self._list, device,
-            on_connect=self._connect_device,
-            on_clean=self._clean_device,
-            on_auto=self._toggle_auto,
-            on_temperature=self._open_temperature,
-            on_remove=self._confirm_remove,
-            on_rename=self.manager.rename_device,
-            on_ip_change=self.manager.set_ip,
-            pulse=self.pulse,
-            label_offset=label_offset,
-        )
-        card.pack(fill="x", pady=(0 if first else theme.CARD_GAP, 0),
-                  before=self._add_button)
-        self._cards[device.id] = card
-        self._order.append(device.id)
-        return card
-
-    def _rebuild(self) -> None:
-        """Build the initial list, progressively.
-
-        A card is ~90 CustomTkinter widgets and costs a few hundred
-        milliseconds, essentially all of it Tcl round-trips. Building 25 of
-        them before the window appears measured **11.1 seconds** of blank
-        screen, which fails the "responsive with 25+ devices" requirement
-        outright.
-
-        So only enough cards to fill the viewport are built synchronously; the
-        rest stream in one per idle tick. The window is up and interactive in
-        well under a second, and the remaining cards appear as the operator is
-        still reading the first ones. Scrolling before they finish simply shows
-        them arriving, which is far better than showing nothing at all.
-        """
-        for card in self._cards.values():
-            card.destroy()
-        self._cards.clear()
-        self._order.clear()
-        self._pending_devices = list(self.manager.devices)
-
-        for _ in range(INITIAL_CARDS):
-            if not self._build_next_card():
-                break
-
-        self._align_all()
-        self._refresh_chrome()
-
-        if self._pending_devices:
-            self._build_job = self.after(CARD_BUILD_INTERVAL_MS, self._build_remaining)
-
-    def _build_next_card(self) -> bool:
-        """Build the next queued card. False when the queue is empty."""
-        if not self._pending_devices:
-            return False
-        device = self._pending_devices.pop(0)
-        # A device could have been removed while still queued.
-        if self.manager.get(device.id) is None:
-            return bool(self._pending_devices)
-        offset = self._offsets.get(device.temperature_alert)
-        self._new_card(device, first=len(self._cards) == 0, label_offset=offset)
-        return True
-
-    def _build_remaining(self) -> None:
-        """Stream in the rest of the cards, one per idle tick.
-
-        Deliberately does NOT call `update_idletasks()`. Doing so re-enters
-        Tk's idle queue and drains this whole chain in a single pass, which
-        silently turns the progressive build back into a blocking one -- the
-        exact bug this replaced. The label offset is taken from the cache that
-        `_align_all` seeded from the first batch, so no measurement is needed;
-        a card whose variant has no cached offset is aligned later by
-        `_render_device`.
-        """
-        self._build_job = None
-        if self._shutting_down or not self._pending_devices:
-            self._pending_devices = []
-            return
-        self._build_next_card()
-        self._refresh_chrome()
-        if self._pending_devices:
-            self._build_job = self.after(CARD_BUILD_INTERVAL_MS, self._build_remaining)
-
-    def _align_all(self) -> None:
-        """One shared alignment pass, seeding the per-variant offset cache.
-
-        Each card's alignment needs computed geometry, so doing it per card
-        would mean one forced relayout per card. Batching keeps startup to a
-        single pass, and the offsets learned here let every card added later
-        skip measuring entirely.
-        """
-        self.update_idletasks()
-        for card in self._cards.values():
-            offset = card.align_labels()
-            if offset is not None:
-                self._offsets[card.variant] = offset
 
     def _refresh_chrome(self) -> None:
         """Scroll hint, scrollbar visibility, sub-header caption, title bar."""
@@ -535,8 +513,8 @@ class App(ctk.CTk):
             return
         device = self.manager.add_device()
         offset = self._offsets.get(False)   # a new device is never in alert
-        card = self._new_card(device, first=len(self._cards) == 1,
-                              label_offset=offset)
+        card = self._view().new_card(device, first=len(self._cards) == 1,
+                                    label_offset=offset)
         self._refresh_chrome()
         if offset is None:
             self.after_idle(lambda: self._settle(card))
@@ -616,15 +594,20 @@ class App(ctk.CTk):
         logger.info("shutdown requested")
 
         # 1. stop accepting new work
-        for attribute in ("_pump_job", "_build_job"):
-            job = getattr(self, attribute, None)
-            if job is not None:
-                try:
-                    self.after_cancel(job)
-                except Exception:
-                    pass
-                setattr(self, attribute, None)
-        self._pending_devices = []
+        job = self._pump_job
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+            self._pump_job = None
+        # The views own their own build jobs and pending queues, so cancelling
+        # them is `shutdown` on each constructed view rather than a loop over
+        # attributes the shell used to hold.
+        try:
+            self.views.shutdown()
+        except Exception:
+            logger.exception("shutdown: view teardown failed")
         self._errors.close()
         if self._splash is not None:
             self._splash.close()

@@ -1352,7 +1352,7 @@ def test_facade_containers_keep_identity_and_write_through(app):
     app._shutting_down = previous
 
 
-def test_lost_facade_attribute_names_app_not_the_tcl_interpreter(app):
+def test_lost_facade_attribute_names_app_not_the_tcl_interpreter(app, monkeypatch):
     """The whole point of the `__getattr__` override.
 
     Without it, `tkinter.Tk.__getattr__` delegates to the interpreter and a
@@ -1360,20 +1360,26 @@ def test_lost_facade_attribute_names_app_not_the_tcl_interpreter(app):
     mentions `App` and gives a reader no reason to suspect the
     modularisation. Measured on a bare `CTk`, not inferred.
 
+    **The mechanism changed at slice 2** and the reason is the point of the
+    test. `_hint` used to be an instance attribute, so this deleted it from
+    `app.__dict__`; it is now a facade *property* over `ListView`, so it is
+    not in the instance dict at all and that deletion raised `KeyError`.
+    Removing the property from the class is also the realistic failure now:
+    post-extraction, the way `_hint` gets lost is a slice moving it out and
+    forgetting to leave a property behind.
+
     Dies on: deleting `App.__getattr__`, or dropping either marker from its
     message.
     """
     _pump(app, 4)
-    del app.__dict__["_hint"]
-    try:
-        with pytest.raises(AttributeError) as excinfo:
-            app._hint
-        message = str(excinfo.value)
-        assert "'App'" in message, f"must name App, got: {message}"
-        assert "_FACADE" in message, "must point at the facade contract"
-        assert "tkapp" not in message, "must not surface the Tcl interpreter"
-    finally:
-        app._hint = None
+    monkeypatch.delattr(type(app), "_hint")
+
+    with pytest.raises(AttributeError) as excinfo:
+        app._hint
+    message = str(excinfo.value)
+    assert "'App'" in message, f"must name App, got: {message}"
+    assert "_FACADE" in message, "must point at the facade contract"
+    assert "tkapp" not in message, "must not surface the Tcl interpreter"
 
 
 def test_non_facade_names_keep_tk_delegation(app):
@@ -1402,10 +1408,13 @@ def test_facade_properties_raise_runtimeerror_not_attributeerror(app):
     modularisation having lost a name. Facade properties must raise
     `RuntimeError`, which propagates.
 
-    **This test is vacuous today and asserts its own vacuity**, so nobody
-    mistakes it for live coverage: no `_FACADE` name is a property yet,
-    because the extractions have not run. It becomes load-bearing at slice 1,
-    and the branch below is what makes that transition visible.
+    **Live since slice 2.** `_cards`, `_order`, `_hint`, `_list`,
+    `_add_button` and `_pending_devices` became facade properties over
+    `ListView`, so the loop below now exercises six real descriptors against a
+    bare instance built with `__new__`. It was vacuous before that, and a
+    companion test asserted its own vacuity so a passing-because-empty run
+    could not be mistaken for coverage; that companion was written to fail
+    here and has been retired.
     """
     properties = sorted(
         name for name in App._FACADE
@@ -1419,23 +1428,3 @@ def test_facade_properties_raise_runtimeerror_not_attributeerror(app):
         probe = type(app).__new__(type(app))      # no __init__, no collaborators
         with pytest.raises(RuntimeError):
             descriptor.fget(probe)
-
-
-def test_no_facade_name_is_a_property_before_slice_1(app):
-    """Pins the precondition that makes the test above vacuous.
-
-    Separated deliberately: a guard whose coverage is currently empty should
-    say so in an assertion rather than in a comment, or the next reader has no
-    way to tell a passing vacuous test from a passing exercised one. When
-    slice 1 lands its first facade property, **this test is expected to fail**
-    -- delete it then, and the test above takes over.
-    """
-    properties = sorted(
-        name for name in App._FACADE
-        if isinstance(getattr(type(app), name, None), property)
-    )
-    assert properties == [], (
-        f"facade properties now exist ({properties}) -- expected at slice 1. "
-        "Delete this test; test_facade_properties_raise_runtimeerror_not_"
-        "attributeerror now covers them."
-    )
