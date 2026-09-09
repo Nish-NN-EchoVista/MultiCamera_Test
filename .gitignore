@@ -1,0 +1,14 @@
+# Generated at runtime
+config.json
+config.json.corrupt
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Verification scratch
+scratchpad/
+*.pristine
+*.bak
