@@ -26,7 +26,6 @@ targeted but should still start.
 from __future__ import annotations
 
 import logging
-import time
 
 import customtkinter as ctk
 
@@ -35,9 +34,8 @@ from . import splash as splash_module
 from .anim import Pulse
 from .backend.config_manager import ConfigManager
 from .backend.device_manager import DeviceManager, DeviceState
-from .backend.events import ConnectionState
 from .backend.logging_setup import shutdown_logging
-from .shell import chrome, commands, handoff
+from .shell import chrome, commands, handoff, pump as pump_module
 from .shell.subheader import SubHeader
 from .splash import LaunchSplash
 from .views.base import StandaloneCtx
@@ -49,11 +47,6 @@ from .widgets.dialogs import ConfirmDialog, ErrorReporter
 from .widgets.title_bar import TitleBar
 
 logger = logging.getLogger("emcc.app")
-
-#: Event drain interval. 10 Hz keeps the UI responsive without spinning: at 25
-#: devices the backend produces ~25 events/s (temperature is throttled to 1 Hz
-#: per device), so a tick typically has two or three events to apply.
-PUMP_INTERVAL_MS = 100
 
 #: Attributes that `tests/` and `tools/visual_pass.py` reach on `App` from
 #: outside, minus the seven that resolve on `customtkinter.CTk` and so never
@@ -112,7 +105,9 @@ class App(ctk.CTk):
             schedule=lambda delay_ms, fn: self.after(delay_ms, fn),
             cancel=self.after_cancel,
         )
-        self.manager.on_device_changed = self._render_device
+        # Composed deliberately: an event means repaint *and* announce.
+        # `_render_device` alone no longer announces -- see shell/pump.py.
+        self.manager.on_device_changed = self._on_device_changed
 
         #: Set by the `list` factory before the host sends `set_devices`,
         #: which is what makes the facade properties below safe during
@@ -393,88 +388,33 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _start_pump(self) -> None:
-        self._pump_job = self.after(PUMP_INTERVAL_MS, self._pump)
+        pump_module.start_pump(self)
 
     def _pump(self) -> None:
-        """Drain backend events and re-render only the cards that changed."""
-        self._pump_job = None
-        # Also guard on the widget still existing: destroy() without a prior
-        # shutdown() (a harness, or an unexpected teardown) leaves this timer
-        # pending, and Tk then reports `invalid command name "..._pump"`.
-        if self._shutting_down or not self.winfo_exists():
-            return
-        try:
-            changed = self.manager.drain_events()
-            for device_id in changed:
-                self._render_device(device_id)
-            if changed:
-                self._refresh_chrome()
-        except Exception:
-            # The pump must survive anything, or the UI stops updating.
-            logger.exception("event pump iteration failed")
-        finally:
-            if not self._shutting_down:
-                self._start_pump()
+        pump_module.pump(self)
+
+    def _on_device_changed(self, device_id: str) -> None:
+        """What `DeviceManager.on_device_changed` is wired to.
+
+        Repaint plus announce. Separate from `_render_device` so that
+        rendering a card is no longer a way to pop a dialog, while every real
+        device event still does both.
+        """
+        pump_module.apply_device_change(self, device_id)
 
     def _render_device(self, device_id: str) -> None:
-        card = self._cards.get(device_id)
-        device = self.manager.get(device_id)
-        if card is None or device is None:
-            return   # removed while an event was in flight
+        """Repaint one card. Does **not** announce faults.
 
-        card.render()
-
-        # A card that gains or loses the "Exceeds threshold" caption changes
-        # its tallest column, so its label baseline moves.
-        offset = self._offsets.get(card.variant)
-        if offset is None:
-            # First card of this shape: measuring needs a layout flush, which
-            # measured 208ms inside a pump tick. Deferred to the next idle slot
-            # so the tick stays fast -- the card renders one frame at the old
-            # baseline, which is imperceptible, and every later card of this
-            # shape uses the cached value.
-            variant = card.variant
-            if variant not in self._measuring:
-                self._measuring.add(variant)
-                self.after_idle(lambda: self._measure_variant(device_id, variant))
-        elif card._label_offset != offset:
-            for section in card._sections:
-                section.set_top(offset)
-            card._label_offset = offset
-
-        self._announce_faults(device)
+        That coupling was removed in slice 3 -- see `shell/pump.py`. Callers
+        wanting both want `_on_device_changed`.
+        """
+        pump_module.render_device(self, device_id)
 
     def _measure_variant(self, device_id: str, variant: bool) -> None:
-        """Measure and cache the label offset for a card shape, once.
-
-        Runs off the pump tick (see _render_device). Guarded on the card still
-        existing, because a device can be removed between scheduling and firing.
-        """
-        self._measuring.discard(variant)
-        if self._shutting_down:
-            return
-        card = self._cards.get(device_id)
-        if card is None or not card.winfo_exists():
-            return
-        self.update_idletasks()
-        offset = card.align_labels()
-        if offset is not None:
-            self._offsets[card.variant] = offset
+        pump_module.measure_variant(self, device_id, variant)
 
     def _announce_faults(self, device: DeviceState) -> None:
-        """Pop a dialog only for faults worth interrupting the operator for.
-
-        Nothing pops for an unexpected disconnect or a retry -- the card shows
-        those. Only a final failure does, coalesced across devices.
-        """
-        if self._shutting_down or device.connection is not ConnectionState.ERROR:
-            device.fault_announced = False
-            return
-        if device.fault_announced:
-            return
-        device.fault_announced = True
-        self._errors.report(device.name, device.ip,
-                            device.last_error or "Connection failed")
+        pump_module.announce_faults(self, device)
 
     # ------------------------------------------------------------------
     # Device actions
