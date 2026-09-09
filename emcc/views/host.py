@@ -45,6 +45,22 @@ class ViewHost:
         self._dirty: set[str] = set()
         self._failures: dict[str, int] = {}
         self._broken: set[str] = set()
+        #: Every contained failure, cumulatively. **Never cleared, not even by
+        #: `shutdown`** -- a teardown failure is exactly the kind worth
+        #: recording.
+        #:
+        #: Separate from `_failures` because that is a *consecutive* streak, by
+        #: design, since `BROKEN_THRESHOLD` needs it to be. Any success resets
+        #: it, so it answers "is this view raising right now?" and cannot
+        #: answer "did anything raise at all?". Measured: a failure in
+        #: `set_devices` followed by a successful `show()` leaves it at zero,
+        #: which is how a construction failure passed an assertion written to
+        #: catch exactly that.
+        #:
+        #: `repr()` rather than the traceback: `logger.exception` already has
+        #: the traceback, so the log stays the deep source and this stays the
+        #: oracle.
+        self._incidents: list[tuple[str, str, str]] = []
 
     # -- registration ----------------------------------------------------
 
@@ -162,7 +178,8 @@ class ViewHost:
             view = self._views[name]
             try:
                 view.shutdown()
-            except Exception:
+            except Exception as exc:
+                self._incidents.append((name, "shutdown", repr(exc)))
                 logger.exception("view %r raised during shutdown", name)
         self._active_name = None
 
@@ -183,7 +200,8 @@ class ViewHost:
             return None
         try:
             result = getattr(view, method)(*args)
-        except Exception:
+        except Exception as exc:
+            self._incidents.append((name, method, repr(exc)))
             self._failures[name] = self._failures.get(name, 0) + 1
             count = self._failures[name]
             logger.exception("view %r raised in %s (%d consecutive)",
@@ -201,3 +219,15 @@ class ViewHost:
 
     def is_broken(self, name: str) -> bool:
         return name in self._broken
+
+    @property
+    def incidents(self) -> tuple[tuple[str, str, str], ...]:
+        """Every contained failure since construction, oldest first.
+
+        Read-only and public, so verification asserts on a supported surface
+        rather than reaching into `_incidents`. Empty is the only acceptable
+        value at the end of a slice: containment keeps the UI alive at
+        runtime, which is right, and this is what stops it also keeping a bug
+        invisible.
+        """
+        return tuple(self._incidents)
