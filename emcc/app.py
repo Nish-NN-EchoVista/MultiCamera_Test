@@ -26,7 +26,6 @@ targeted but should still start.
 from __future__ import annotations
 
 import logging
-import sys
 import time
 
 import customtkinter as ctk
@@ -38,12 +37,8 @@ from .backend.config_manager import ConfigManager
 from .backend.device_manager import DeviceManager, DeviceState
 from .backend.events import ConnectionState
 from .backend.logging_setup import shutdown_logging
-from .integrations import (
-    PyGuiState,
-    launch_pygui,
-    pygui_state,
-    pygui_windows,
-)
+from .shell import chrome, commands, handoff
+from .shell.subheader import SubHeader
 from .splash import LaunchSplash
 from .widgets.add_device import AddDeviceButton
 from .widgets.device_card import DeviceCard
@@ -51,8 +46,6 @@ from .widgets.dialogs import ConfirmDialog, ErrorReporter
 from .widgets.title_bar import TitleBar
 
 logger = logging.getLogger("emcc.app")
-
-LEGEND_GAP = 20  # gap-5
 
 #: Event drain interval. 10 Hz keeps the UI responsive without spinning: at 25
 #: devices the backend produces ~25 events/s (temperature is throttled to 1 Hz
@@ -89,24 +82,6 @@ _FACADE_NAMES: frozenset[str] = frozenset({
 #: callback re-queues before the queue is checked again -- which silently
 #: turns the progressive build back into a blocking one.
 CARD_BUILD_INTERVAL_MS = 1
-
-#: How long to wait for PyGUI's window before the splash reports failure.
-#: PyGUI measures 7-8s from click to ready, so this is generous without
-#: leaving the operator staring at an animation after a crash.
-SPLASH_TIMEOUT_S = 20.0
-
-#: Consecutive READY polls before the splash is dismissed. PyGUI's
-#: responsiveness probe flaps while its config panel builds in batches, so one
-#: poll is not evidence the loop is free.
-SPLASH_READY_POLLS = 2
-
-#: If the frame bank is still building when a hand-off starts, wait for it
-#: rather than silently going without a splash. Pre-rendering takes ~720ms on
-#: a background thread and starts 500ms after first paint, so a click inside
-#: the first ~1.2s can arrive early. Waiting briefly covers that; PyGUI takes
-#: ~8s to be ready, so a splash raised 0.5s late still covers the wait.
-SPLASH_WAIT_MS = 150
-SPLASH_WAIT_ATTEMPTS = 10
 
 
 class App(ctk.CTk):
@@ -195,117 +170,38 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _strip_caption(self) -> None:
-        if sys.platform != "win32":
-            self.overrideredirect(True)
-            return
-        try:
-            import ctypes
-
-            self.update_idletasks()
-            user32 = ctypes.windll.user32
-            hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
-
-            GWL_STYLE = -16
-            WS_CAPTION = 0x00C00000
-            SWP_NOMOVE, SWP_NOSIZE, SWP_FRAMECHANGED = 0x0002, 0x0001, 0x0020
-
-            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-            user32.SetWindowLongW(hwnd, GWL_STYLE, style & ~WS_CAPTION)
-            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED)
-        except Exception:
-            # Cosmetic only -- fall back to the native caption rather than
-            # leaving the window undraggable.
-            logger.debug("could not strip the native caption", exc_info=True)
+        chrome.strip_caption(self)
 
     def _drag_start(self, event) -> None:
-        self._drag_origin = (event.x_root - self.winfo_x(),
-                             event.y_root - self.winfo_y())
+        chrome.drag_start(self, event)
 
     def _drag_move(self, event) -> None:
-        if self._maximised:
-            return
-        dx, dy = self._drag_origin
-        self.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+        chrome.drag_move(self, event)
 
     def _minimise(self) -> None:
-        self.iconify()
+        chrome.minimise(self)
 
     def _toggle_maximise(self) -> None:
-        # "zoomed" respects the work area, so the taskbar stays visible.
-        self._maximised = not self._maximised
-        self.state("zoomed" if self._maximised else "normal")
+        chrome.toggle_maximise(self)
 
     # ------------------------------------------------------------------
     # Sub-header
     # ------------------------------------------------------------------
 
     def _build_subheader(self) -> None:
-        """px-8 pt-4 pb-2.5 flex items-end justify-between border-b"""
-        bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x")
+        """Build the banner via the `SubHeader` builder.
 
-        row = ctk.CTkFrame(bar, fg_color="transparent")
-        row.pack(fill="x", padx=theme.PAGE_PAD_X, pady=(16, 10))
-
-        left = ctk.CTkFrame(row, fg_color="transparent")
-        left.pack(side="left", anchor="s")
-
-        ctk.CTkLabel(
-            left,
-            text=fonts.tracked("DEVICE CONTROLLERS", 0.12),
-            font=fonts.sans(11, 600),
-            text_color=theme.TEXT_SUBHEAD,
-            anchor="w",
-        ).pack(fill="x")
-
-        self._caption = ctk.CTkLabel(
-            left, text="", font=fonts.sans(11), text_color=theme.TEXT_WHISPER,
-            anchor="w", height=15,
-        )
-        self._caption.pack(fill="x", pady=(2, 0))  # mt-0.5
-
-        legend = ctk.CTkFrame(row, fg_color="transparent")
-        legend.pack(side="right", anchor="s", pady=(0, 2))  # pb-0.5
-
-        # Echovista wordmark, centred in the banner between the heading and the
-        # legend.
-        #
-        # TRUE CENTRE, not the midpoint of the gap between its neighbours. The
-        # two look almost identical at the default width (they differ by ~15px
-        # here), but the midpoint is anchored to the *left block's* right edge,
-        # and that block's caption changes width with the device count
-        # ("1 device configured" vs "25 devices configured"). A midpoint-placed
-        # logo would therefore visibly shift sideways every time a device is
-        # added or removed, which is exactly the kind of movement a wordmark
-        # must not do. True centre is stable against both that and window
-        # resizing, and it is what "centred logo" means to the eye.
-        #
-        # `place` rather than `pack`, because a packed centre would be the
-        # centre of the *remaining* space after its siblings, i.e. the midpoint
-        # again.
-        #
-        # Vertically *centred*, not bottom-aligned like its neighbours: at a
-        # height that fills the band there is no baseline left to share, and an
-        # element spanning the full row reads correctly only when its optical
-        # centre matches the row's.
-        logo = icons.load_logo(theme.BANNER_LOGO_H)
-        if logo is not None:
-            self._logo = ctk.CTkLabel(row, text="", image=logo)
-            self._logo.place(relx=0.5, rely=0.5, anchor="center")
-
-        for index, (colour, label) in enumerate(theme.LEGEND):
-            item = ctk.CTkFrame(legend, fg_color="transparent")
-            item.pack(side="left", padx=(0 if index == 0 else LEGEND_GAP, 0))
-            dot = ctk.CTkFrame(item, width=8, height=8, corner_radius=4,
-                               fg_color=colour, border_width=0)
-            dot.pack(side="left")
-            dot.pack_propagate(False)
-            ctk.CTkLabel(item, text=label, font=fonts.sans(10.5),
-                         text_color=theme.TEXT_GHOST).pack(side="left", padx=(6, 0))
-
-        ctk.CTkFrame(bar, height=1, fg_color=theme.SUBHEADER_RULE,
-                     corner_radius=0).pack(fill="x")
+        `_logo` is assigned **only when the wordmark loaded**, which is what
+        this did before the extraction: on a failed load `App` has no `_logo`
+        attribute at all. Since `_logo` is in `_FACADE_NAMES`, the absence is
+        now reported by `__getattr__` naming the facade rather than as a Tcl
+        error -- but the absence itself is pre-existing behaviour and is
+        preserved deliberately, not tidied away into a `None`.
+        """
+        sub = SubHeader(self)
+        self._caption = sub.caption
+        if sub.logo is not None:
+            self._logo = sub.logo
 
     # ------------------------------------------------------------------
     # Device list
@@ -607,72 +503,16 @@ class App(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _connect_device(self, device_id: str) -> None:
-        device = self.manager.get(device_id)
-        if device is None:
-            return
-        # Clear any previous announcement so a fresh failure pops again.
-        device.fault_announced = False
-        error = self.manager.toggle_connection(device_id)
-        if error is not None:
-            self._errors.show_now(device.name, device.ip, error)
-        self._render_device(device_id)
-        self._refresh_chrome()
+        commands.connect_device(self, device_id)
 
     def _clean_device(self, device_id: str) -> None:
-        if not self.manager.start_clean(device_id):
-            device = self.manager.get(device_id)
-            if device is not None and not device.is_connected:
-                self._errors.show_now(
-                    device.name, device.ip,
-                    "Connect the device before starting a Clean")
-            return
-        self._render_device(device_id)
+        commands.clean_device(self, device_id)
 
     def _toggle_auto(self, device_id: str) -> None:
-        device = self.manager.get(device_id)
-        if device is None:
-            return
-        if not self.manager.set_auto(device_id, not device.auto_enabled):
-            if not device.is_connected:
-                self._errors.show_now(
-                    device.name, device.ip,
-                    "Connect the device before enabling Auto")
-            return
-        self._render_device(device_id)
+        commands.toggle_auto(self, device_id)
 
     def _open_temperature(self, device_id: str) -> None:
-        """Hand this device over to PyGUI for detailed diagnostics.
-
-        Order is load-bearing: the NPort accepts one client, so EMCC must
-        release the device before PyGUI can claim it. PyGUI waits ~1.5s before
-        connecting, which covers the socket actually closing.
-
-        The launch is attempted *first* so that a failed hand-off (PyGUI moved,
-        no IP set) does not drop a working connection for nothing.
-
-        EMCC does not reattach afterwards: closing PyGUI frees the device and
-        the operator reconnects here by hand.
-        """
-        device = self.manager.get(device_id)
-        if device is None:
-            return
-
-        # Windows already on screen for this device. A second hand-off would
-        # otherwise match the *existing* PyGUI and dismiss the splash at once.
-        existing = pygui_windows(device.ip)
-
-        error = launch_pygui(device.ip, self.config_manager.settings.pygui_path)
-        if error is not None:
-            self._errors.show_now(device.name, device.ip, error)
-            return
-
-        if device.connection.is_live:
-            logger.info("%s released for the PyGUI hand-off", device.name)
-            self.manager.disconnect(device_id)
-            self._render_device(device_id)
-            self._refresh_chrome()
-
-        self._show_launch_splash(device.name, device.ip, existing)
+        commands.open_temperature(self, device_id)
 
     # ------------------------------------------------------------------
     # Launch splash
@@ -681,77 +521,13 @@ class App(ctk.CTk):
     def _show_launch_splash(
         self, name: str, ip: str, existing: list[int], attempt: int = 0
     ) -> None:
-        """Cover PyGUI's ~7-8s startup, dismissing when it is actually up.
-
-        Retries while the frame bank is still pre-rendering. Going without a
-        splash is a valid fallback for a *failed* build, but not for one that
-        simply has not finished -- that would show up as an intermittently
-        missing animation depending on how soon after launch the operator
-        clicked, which is the kind of flakiness nobody manages to reproduce.
-        """
-        if self._shutting_down:
-            return
-        if not splash_module.FRAMES.ready and attempt < SPLASH_WAIT_ATTEMPTS:
-            self.after(
-                SPLASH_WAIT_MS,
-                lambda: self._show_launch_splash(name, ip, existing, attempt + 1),
-            )
-            return
-
-        if self._splash is not None and self._splash.alive:
-            self._splash.close()
-
-        splash = LaunchSplash(self, on_dismiss=self._on_splash_dismissed)
-        if not splash.show(f"Launching PyGUI for {name}…"):
-            return                      # frames not ready; go without
-        self._splash = splash
-        self._splash_deadline = time.monotonic() + SPLASH_TIMEOUT_S
-        self._splash_ready_polls = 0
-        self._poll_pygui(ip, existing)
+        handoff.show_launch_splash(self, name, ip, existing, attempt)
 
     def _poll_pygui(self, ip: str, existing: list[int]) -> None:
-        """Watch for PyGUI, then dismiss. Never leaves the splash stranded."""
-        self._splash_job = None
-        splash = self._splash
-        if splash is None or not splash.alive or self._shutting_down:
-            return
-
-        state = pygui_state(ip, ignore=existing)
-        if state is PyGuiState.READY:
-            # Debounced: the responsiveness probe alternates while PyGUI's
-            # config panel builds in batches, so one READY poll can land in a
-            # gap between them. Two in a row means the loop is genuinely free.
-            self._splash_ready_polls += 1
-            if self._splash_ready_polls >= SPLASH_READY_POLLS:
-                logger.info("PyGUI is up for %s; dismissing the splash", ip)
-                splash.close()
-                return
-        else:
-            self._splash_ready_polls = 0
-            if state is PyGuiState.STARTING:
-                splash.set_status(f"Starting interface — {ip}…")
-
-        if time.monotonic() >= self._splash_deadline:
-            # Report rather than vanish: a crash and a slow start look
-            # identical otherwise, and the operator is left guessing.
-            logger.warning("PyGUI did not appear for %s within %.0fs",
-                           ip, SPLASH_TIMEOUT_S)
-            splash.fail("PyGUI did not start — see logs/emcc.log")
-            return
-
-        self._splash_job = self.after(
-            splash_module.POLL_INTERVAL_MS,
-            lambda: self._poll_pygui(ip, existing),
-        )
+        handoff.poll_pygui(self, ip, existing)
 
     def _on_splash_dismissed(self) -> None:
-        self._splash = None
-        if self._splash_job is not None:
-            try:
-                self.after_cancel(self._splash_job)
-            except Exception:
-                pass
-            self._splash_job = None
+        handoff.on_splash_dismissed(self)
 
     def _add_device(self) -> None:
         """Append one card in place, leaving the existing ones untouched."""

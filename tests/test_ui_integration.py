@@ -1268,10 +1268,22 @@ def test_facade_covers_every_name_reached_from_outside():
 
     It does **not** die on removing `tools/visual_pass.py` from the sources,
     and an earlier version of this docstring claimed it did. Measured: with
-    the tool dropped, all seven facade tests still passed. The reason is the
-    subset direction itself -- removing a source only *shrinks* `reached`, and
-    a smaller set is trivially still a subset. The one-directional blindness
-    that makes this test trustworthy is exactly what blinds it here.
+    the tool dropped, all seven facade tests still passed.
+
+    The reason is worth stating precisely, because the guarantee is
+    per-dimension and only one dimension was ever covered:
+
+    - **name dimension -- safe.** Over-inclusion can only ever demand that a
+      name be *added* to `_FACADE`. A false regex match cannot let a real name
+      be dropped, so there is no false all-clear.
+    - **source dimension -- blind.** Dropping a source only *shrinks*
+      `reached`, and a smaller set is trivially still a subset. Nothing about
+      the subset relation notices that a whole file stopped being read.
+
+    So the property that makes this test trustworthy in the first dimension is
+    exactly what blinds it in the second. Not a symmetry, and describing it as
+    "cutting both ways" understates it: one direction is guaranteed, the other
+    is unguarded until pinned separately.
 
     So the tool's presence is pinned separately below, by a name reachable
     from nowhere else.
