@@ -934,7 +934,11 @@ def test_missing_logo_asset_does_not_break_startup(monkeypatch, tmp_path):
 #
 # ADDITIONS, not modifications -- no existing assertion is touched by these.
 #
-# `_refresh_chrome` mixes four concerns and none of them was asserted anywhere:
+# `_refresh_chrome` mixed four concerns and none of them was asserted anywhere
+# when these tests were written. Slice 4 split it -- hint and scrollbar to
+# ListView, caption wording to the active view placed by SubHeader, counts to
+# title_bar -- and these tests survived the split unchanged because they assert
+# the behaviour rather than where it lives. The concerns were:
 # hint text, hint visibility (with its re-pack guard), scrollbar visibility,
 # and the sub-header caption. The refactor splits those three ways -- hint and
 # scrollbar to `ListView`, caption to `SubHeader`, counts to `title_bar` -- so
@@ -1027,7 +1031,11 @@ def test_scroll_hint_is_not_repacked_on_every_refresh(app, monkeypatch):
     explain it -- otherwise a future reader deletes it as redundant.
 
     Dies on: removing `if scrolling != self._hint_shown:` so `pack()` runs on
-    every refresh.
+    every refresh. **That guard moved to `ListView.on_device_count_changed`
+    in slice 4** -- the rules belong to the view that owns the widget. The
+    test still drives it through `app._refresh_chrome()`, which is the
+    behaviour rather than the location, so it needed no change beyond this
+    note.
     """
     while len(app.manager.devices) < theme.SCROLL_THRESHOLD:
         app._add_device()
@@ -1050,7 +1058,8 @@ def test_scroll_hint_is_not_repacked_on_every_refresh(app, monkeypatch):
 def test_scrollbar_appears_only_at_the_threshold(app):
     """The design shows the scrollbar only once the list scrolls.
 
-    Dies on: deleting the `_set_scrollbar_visible(scrolling)` call.
+    Dies on: deleting the `_set_scrollbar_visible(scrolling)` call, which
+    slice 4 moved into `ListView.on_device_count_changed`.
 
     It does **not** catch removal of that method's early-return guard, and an
     earlier version of this docstring claimed it did. Measured: with the guard
@@ -1101,7 +1110,9 @@ def test_scrollbar_is_not_regridded_on_every_refresh(app, monkeypatch):
     the sibling visibility test does not catch this mutation despite once
     claiming to.
 
-    Dies on: removing `if visible == self._scrollbar_visible: return`.
+    Dies on: removing `if visible == self._scrollbar_visible: return`,
+    which moved to `ListView._set_scrollbar_visible` in slice 4 along with the
+    cached flag. Still driven through `app._refresh_chrome()`.
     """
     while len(app.manager.devices) < theme.SCROLL_THRESHOLD:
         app._add_device()

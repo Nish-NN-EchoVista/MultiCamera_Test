@@ -114,14 +114,6 @@ class App(ctk.CTk):
         #: construction -- see the wiring-order rule in VIEW_CONTRACT.md.
         self._list_view: ListView | None = None
         self._offsets: dict[bool, float] = {}
-        # Chrome state for `_refresh_chrome` and `_set_scrollbar_visible`,
-        # which stay in the shell until slice 4. Initialised here rather than
-        # where the list is built, because `_refresh_chrome` runs during the
-        # view's first `set_devices` and would otherwise read them before they
-        # existed. `_scrollbar_visible` starts True because
-        # CTkScrollableFrame grids its scrollbar by default.
-        self._hint_shown = False
-        self._scrollbar_visible = True
         #: Variants with a measurement already queued, so a card that
         #: re-renders before it lands cannot pile up callbacks.
         self._measuring: set[bool] = set()
@@ -193,7 +185,8 @@ class App(ctk.CTk):
         error -- but the absence itself is pre-existing behaviour and is
         preserved deliberately, not tidied away into a `None`.
         """
-        sub = SubHeader(self)
+        self._sub = SubHeader(self)
+        sub = self._sub
         self._caption = sub.caption
         if sub.logo is not None:
             self._logo = sub.logo
@@ -339,49 +332,39 @@ class App(ctk.CTk):
             )
         return super().__getattr__(name)
 
-    def _set_scrollbar_visible(self, visible: bool) -> None:
-        """The design only shows the scrollbar at >= 4 devices.
-
-        Guarded on the current state: re-applying grid() to an already-gridded
-        widget re-runs its geometry and triggers CTkScrollbar._draw. This is
-        called on every chrome refresh, so the no-op case has to be a no-op.
-        """
-        if visible == self._scrollbar_visible:
-            return
-        bar = getattr(self._list, "_scrollbar", None)
-        if bar is None:
-            return
-        if visible:
-            bar.grid()
-        else:
-            bar.grid_remove()
-        self._scrollbar_visible = visible
-
     def _refresh_chrome(self) -> None:
-        """Scroll hint, scrollbar visibility, sub-header caption, title bar."""
+        """Ask each owner to refresh the chrome it owns.
+
+        Slice 4 split this. It used to do four unrelated jobs inline -- hint
+        text, hint visibility, scrollbar visibility, caption wording and the
+        title-bar counts -- and none of them was asserted anywhere. Each now
+        belongs to whoever owns the widget:
+
+            hint + scrollbar   the active view (`on_device_count_changed`)
+            caption wording    the active view (`caption`), placed by SubHeader
+            counts             `title_bar.update_from`
+
+        **The view is called directly rather than through the host, and that
+        is deliberate.** `ViewHost._call` contains exceptions, which is right
+        at runtime and wrong here: a failure in chrome refresh would be logged
+        and swallowed, and this method is reached on every device change. It
+        is currently the *loud* path -- an `AttributeError` from it is what
+        surfaced the missing `_hint_shown` during slice 2, when the same fault
+        inside containment was invisible. Routing it through `_call` would
+        have converted the last loud path in the chrome chain into a silent
+        one for no benefit.
+
+        `on_device_count_changed` is the contract's own method for "the count
+        moved, update yourself", so no new host API was needed either.
+        """
         total = len(self.manager.devices)
-        scrolling = total >= theme.SCROLL_THRESHOLD
 
-        # No device cap: the design's "supports up to 25" was a demo limit.
-        self._hint.configure(text=f"Scroll to view all {total} devices")
-        if scrolling != self._hint_shown:
-            if scrolling:
-                self._hint.pack(pady=(8, 4))
-            else:
-                self._hint.pack_forget()
-            self._hint_shown = scrolling
+        view = self.views.active
+        if view is not None:
+            view.on_device_count_changed(total)
+            self._sub.set_caption(view.caption(total))
 
-        self._set_scrollbar_visible(scrolling)
-
-        self._caption.configure(
-            text=f"{total} device{'' if total == 1 else 's'} configured · "
-                 "click Connect to establish TCP connection"
-        )
-        self.title_bar.update_status(
-            connected=self.manager.connected_count,
-            total=total,
-            alerts=self.manager.alert_count(),
-        )
+        self.title_bar.update_from(self.manager)
 
     # ------------------------------------------------------------------
     # Event pump

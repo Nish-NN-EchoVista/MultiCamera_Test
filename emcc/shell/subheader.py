@@ -101,3 +101,13 @@ class SubHeader:
 
         ctk.CTkFrame(bar, height=1, fg_color=theme.SUBHEADER_RULE,
                      corner_radius=0).pack(fill="x")
+
+    def set_caption(self, text: str) -> None:
+        """Set the device-count line.
+
+        The *wording* belongs to the active view, which composes it in
+        `caption(total)` -- each view describes its own contents. The
+        sub-header only places it. Slice 4 moved the composition out of the
+        shell for that reason.
+        """
+        self.caption.configure(text=text)

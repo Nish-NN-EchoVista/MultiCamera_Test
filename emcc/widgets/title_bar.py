@@ -175,6 +175,25 @@ class TitleBar(ctk.CTkFrame):
 
     # -- updates ----------------------------------------------------------
 
+    def update_from(self, manager) -> None:
+        """Read the device counts straight off the manager.
+
+        Slice 4 moved the counts here. The shell used to compute
+        `connected_count`, `len(devices)` and `alert_count()` and pass all
+        three, which made every count change a two-place edit -- the title bar
+        knowing which numbers it displays is the whole point of it owning
+        them.
+
+        `update_status` stays as the explicit-values entry point: the tests
+        drive alert states through it directly, and a widget that can only be
+        fed a live manager is harder to test than one that accepts numbers.
+        """
+        self.update_status(
+            connected=manager.connected_count,
+            total=len(manager.devices),
+            alerts=manager.alert_count(),
+        )
+
     def update_status(self, connected: int, total: int, alerts: int) -> None:
         self._count_connected.configure(text=str(connected))
         self._count_total.configure(text=str(total))

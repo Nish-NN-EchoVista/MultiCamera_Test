@@ -7,17 +7,15 @@ with the same master, as `app.py` created it before this extraction. Making
 `CTkFrame` children, which is the whole reason `VIEW_CONTRACT.md` declares
 `widget` instead of assuming a view is one.
 
-Relocated from `app.py`'s "Device list" section. Two things stay behind
-deliberately:
+Relocated from `app.py`'s "Device list" section, and since slice 4 this owns
+the scroll hint and scrollbar-visibility rules too -- they are this view's
+business, not the shell's. The Dashboard has a scrollport but no rules
+governing it, which is why they live here rather than in a shared base class.
 
-- **The scroll hint and scrollbar-visibility rules.** The hint *widget* is
-  built here, because it is a child of the scroll frame and moving its parent
-  would move its pathname. When it shows, and whether the scrollbar is
-  gridded, is still decided by the shell's `_refresh_chrome` until slice 4.
-- **The label-offset cache.** `offsets` is handed in and held by reference
-  rather than owned here, because the shell's `_render_device`,
-  `_measure_variant` and `_settle` all still use it this slice. One dict, one
-  source of truth: a second cache here would diverge silently.
+One thing stays behind deliberately: **the label-offset cache.** `offsets` is
+handed in and held by reference rather than owned here, because the shell's
+`render_device`, `measure_variant` and `_settle` all still use it. One dict,
+one source of truth -- a second cache here would diverge silently.
 """
 
 from __future__ import annotations
@@ -119,6 +117,11 @@ class ListView:
             self._frame, text="", font=fonts.sans(10.5),
             text_color=theme.TEXT_SCROLL_HINT, height=14,
         )
+        #: Cached because the guards in `on_device_count_changed` are the whole
+        #: point of them. `_scrollbar_visible` starts True because
+        #: CTkScrollableFrame grids its scrollbar at construction.
+        self._hint_shown = False
+        self._scrollbar_visible = True
 
         self._devices: list[DeviceState] = (
             list(devices) if devices is not None else list(manager.devices)
@@ -282,10 +285,58 @@ class ListView:
         self._devices = [d for d in self._devices if d.id != device_id]
 
     def on_device_count_changed(self, total: int) -> None:
-        # The list re-flows by packing, so a count change needs no geometry
-        # work here. Required by the contract rather than optional: a view the
-        # host cannot tell about a count change is how a stale count survives.
-        self._on_changed()
+        """The scroll hint and the scrollbar, which are this view's business.
+
+        Moved here in slice 4. The Dashboard has a scrollport but no rules
+        governing it, so these belong to `ListView` and not to a shared base
+        class -- a view inheriting a hint it has no use for is exactly what
+        `VIEW_CONTRACT.md` warns against.
+
+        **Deliberately does not call `_on_changed`.** It used to, and the
+        shell's `_refresh_chrome` now calls *this*, so calling back would
+        recurse without terminating.
+
+        Both branches stay guarded on a cached flag. Re-applying `pack()` or
+        `grid()` to a widget that already has it re-runs its geometry and
+        triggers a redraw, and this runs on every chrome refresh, so the
+        no-op case has to be a genuine no-op.
+        """
+        # No device cap: the design's "supports up to 25" was a demo limit.
+        self.hint.configure(text=f"Scroll to view all {total} devices")
+
+        scrolling = total >= theme.SCROLL_THRESHOLD
+        if scrolling != self._hint_shown:
+            if scrolling:
+                self.hint.pack(pady=(8, 4))
+            else:
+                self.hint.pack_forget()
+            self._hint_shown = scrolling
+
+        self._set_scrollbar_visible(scrolling)
+
+    def _set_scrollbar_visible(self, visible: bool) -> None:
+        """The design only shows the scrollbar at >= 4 devices.
+
+        Keeps its cached flag rather than deriving from `bool(grid_info())`.
+        That derive-not-cache change is queued as its own slice after the
+        refactor, because it is a behaviour change and this slice is a move.
+
+        Note the asymmetry, which Tk forces rather than us choosing: after
+        `grid_remove()` `grid_info()` returns `{}`, so a derived predicate is
+        available for the scrollbar -- while after `pack_forget()`
+        `pack_info()` **raises TclError**, so no derived predicate exists for
+        the hint at all. Measured both.
+        """
+        if visible == self._scrollbar_visible:
+            return
+        bar = getattr(self._frame, "_scrollbar", None)
+        if bar is None:
+            return
+        if visible:
+            bar.grid()
+        else:
+            bar.grid_remove()
+        self._scrollbar_visible = visible
 
     # -- lifecycle -------------------------------------------------------
 
