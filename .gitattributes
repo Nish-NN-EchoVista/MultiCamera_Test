@@ -1,0 +1,4 @@
+# Store and check out bytes VERBATIM.
+# The verification discipline records md5s of working-tree files; any line-ending
+# normalisation would silently invalidate every recorded hash on checkout.
+* -text
