@@ -1674,12 +1674,36 @@ def test_the_chrome_follows_the_active_view(app):
     way to check this test, which is why it is replaced rather than deleted.
 
     This assertion is deliberately indifferent to letter-spacing; see
-    `_detracked`. Measured separation, all four mutations:
+    `_detracked`. Measured separation, all four mutations, each against the
+    FULL suite at 6e01187 plus the named mutation:
 
-        tracking constant 0.12 -> 0.14        neither test dies
-        _on_shown dropped from host.show      THIS test only
-        on_shown=None at app.py:212           THIS test only
-        fonts.tracked dropped from set_heading   the rendering test only
+        tracking constant 0.12 -> 0.14           0 tests die
+        _on_shown dropped from host.show         3 -- this one, plus
+                                                 test_the_host_refresh_is_not_
+                                                 contained and test_the_host_
+                                                 refreshes_the_chrome_on_every_show
+        on_shown=None at app.py:212              1 -- this test only
+        fonts.tracked dropped from set_heading   1 -- the rendering test only
+
+    THE ASYMMETRY IN THE MIDDLE TWO IS REAL, not an error. Dropping
+    `_on_shown()` breaks `ViewHost.show` itself, so the two host-level tests
+    die as well -- they build their own `ViewHost` and pass their own
+    callback. `on_shown=None` touches only App's wiring, which those tests do
+    not use. Do not "fix" the third row to match the second.
+
+    An earlier version of this table said "THIS test only" for both of the
+    middle rows, and took its figures under
+    `-k "chrome_follows or tracked_exactly_once"`. **"Only" is a claim about
+    every test and it had been measured against two.** Re-measured against
+    the full suite, three of the four rows turned out to be true anyway and
+    the second was wrong -- so the filter did not make them false, it made
+    them unestablished, which is a different defect and not a smaller one.
+
+    Provenance, because a matrix published as measured owes it: the four runs
+    span a docs-only commit (`6e01187`, `docs/UI_SPEC.md` and
+    `tools/gen_ui_spec.py`). No test reads either file -- grepped -- so it
+    cannot move a suite count, established structurally rather than by
+    re-running.
     """
     _pump(app, 4)
     assert app.views.active_name == "list"

@@ -250,11 +250,25 @@ class ConfigManager:
 
         This used to swallow the `OSError` entirely, which lost the config
         unrecoverably and said nothing: the operator saw an application that
-        had come up with three default devices. The failure is not
-        hypothetical here either. `tests/conftest.py` names the causes in this
-        codebase's own words -- "handle churn, or a scanner holding it" -- and
-        this tree is OneDrive-hosted with Defender live, so a transient
-        `OSError` on a write is a real event rather than a theoretical one.
+        had come up with three default devices.
+
+        JUSTIFIED BY THE CONSEQUENCE, not by the likelihood. A config that
+        could not be read and could not be backed up is the operator's only
+        copy of their device list, so writing defaults over it destroys it
+        with nothing to recover from. That holds at any failure rate,
+        including one nobody has measured -- which is the situation here.
+
+        An earlier version argued from likelihood instead, and did it twice
+        over. It asserted this tree was "OneDrive-hosted with Defender live":
+        false since the move to C:/Nish/MultiCam. And it cited
+        `tests/conftest.py` for the cause, quoting "handle churn, or a scanner
+        holding it" -- a phrase since deleted from that file as an unmeasured
+        hypothesis, so the citation outlived the text it pointed at and named
+        a withdrawn cause as authority.
+
+        A justification resting on an environment, or on another file's
+        wording, has two ways to go stale. One resting on the consequence of
+        failing has none.
         """
         backup = self.path.with_suffix(self.path.suffix + ".corrupt")
         try:

@@ -212,10 +212,32 @@ _ALLOW_MARK = "allow_contained_exceptions"
 class _ContainedExceptionRecorder(logging.Handler):
     """Records log entries that carry an exception, at WARNING or above.
 
-    **Both conditions matter, and the level one is load-bearing rather than
-    tidiness.** `exc_info` alone would be the cleaner rule -- every
-    containment site uses `logger.exception`, which sets it, while ordinary
-    error logging does not. But two sites set `exc_info` at **DEBUG** and are
+    **WHAT THIS DOES NOT SEE, stated first because the docstring used to
+    argue the opposite.** It said `exc_info` would be the cleaner rule because
+    "every containment site uses `logger.exception`, which sets it". That was
+    never true -- not broken by any change, false from the start. Measured
+    per handler, at HEAD:
+
+        TRACKED   14   some call in the handler carries exception info
+        UNSEEN    10   no call does, so this handler is invisible here
+
+    The ten: `config_manager` from_dict / load[OSError] /
+    load[JSONDecodeError] / save_now, `connection_worker` _wake /
+    _emit[queue.Full] / _flush_outgoing, `icons.load_logo`,
+    `integrations.launch_pygui`, `splash._compose_card`. Eight predate
+    2026-09-10. They report a caught exception at WARNING or above by passing
+    it as a format argument, which sets nothing this handler can key on.
+
+    Two further sites are invisible for a different reason: `logging_setup`
+    and `config_manager._notify_save_error` catch inside a handler and report
+    **outside** it, so no handler-scoped rule reaches them at all.
+
+    Count per HANDLER, not per call. `views/host.py` logs twice in one
+    handler -- `logger.exception` then a `logger.error` escalation -- and
+    counting calls makes a tracked handler look untracked.
+
+    **The level condition is still load-bearing rather than tidiness**, and
+    for its own reason: two sites set `exc_info` at **DEBUG** and are
     deliberate non-failures:
 
         integrations.py:142  pygui_windows: enumeration failed
