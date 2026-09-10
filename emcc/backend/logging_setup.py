@@ -49,6 +49,7 @@ def setup_logging(
         root.removeHandler(handler)
 
     path: Path | None = None
+    file_error: OSError | None = None
     try:
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / LOG_FILE.name
@@ -64,7 +65,9 @@ def setup_logging(
         root.addHandler(file_handler)
     except OSError as exc:
         path = None
-        print(f"warning: file logging unavailable ({exc})", file=sys.stderr)
+        # Held, not reported yet -- see the emission below. A `print` here is
+        # discarded exactly when it matters most.
+        file_error: OSError | None = exc
 
     if console:
         # pythonw has no console; sys.stderr can be None there.
@@ -76,6 +79,35 @@ def setup_logging(
 
     # Tk's own noise is not interesting at INFO.
     logging.getLogger("PIL").setLevel(logging.WARNING)
+
+    if file_error is not None:
+        # Emitted through `logging`, after the handlers are in place, rather
+        # than by `print` before them.
+        #
+        # The `print` this replaces wrote to `sys.stderr`, which is **None
+        # under a windowed interpreter** -- and `print(file=None)` then falls
+        # back to `sys.stdout`, also None, and **returns silently**. Measured
+        # against a real file descriptor, not inferred. So the single message
+        # telling the operator there would be no log file was itself
+        # discarded, in precisely the situation where the log could not
+        # record it either.
+        #
+        # That windowed execution is reachable is not a guess: the `console`
+        # branch a few lines above guards `sys.stderr is not None` for exactly
+        # this reason, so either that guard is dead code or this one was
+        # missing.
+        #
+        # Routing it through the root logger puts it in front of every
+        # handler that exists. **It does not manufacture a channel where
+        # none exists**: with no file handler and no console, `logging` falls
+        # back to `lastResort`, which writes to the same absent `stderr`. A
+        # windowed run with unwritable logs still has nowhere to speak, and
+        # that gap is the product's to close with a dialog, not this
+        # module's.
+        logging.getLogger(__name__).warning(
+            "file logging unavailable (%s); continuing with no log file",
+            file_error,
+        )
 
     _configured = True
     return path
