@@ -156,6 +156,11 @@ class ConfigManager:
         self._timer: threading.Timer | None = None
         self._timer_lock = threading.Lock()
         self._save_failures = 0
+        #: Set when an unreadable config could not be preserved. While it is
+        #: true, `save_now` refuses: the original bytes exist only in
+        #: `self.path`, and saving defaults over them would destroy the
+        #: operator's device list with nothing left to recover from.
+        self._preserve_failed = False
         self.on_save_error: Callable[[Exception], None] | None = None
 
     # -- load --------------------------------------------------------------
@@ -179,8 +184,10 @@ class ConfigManager:
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
-            # Keep the bad file so it can be inspected rather than silently lost.
-            self._quarantine(raw)
+            # Keep the bad file so it can be inspected rather than silently
+            # lost -- and if that could not be done, refuse to save over it.
+            if not self._quarantine(raw):
+                self._preserve_failed = True
             logger.error("config: %s is malformed (%s), using defaults", self.path, exc)
             self._use_defaults()
             return
@@ -233,13 +240,36 @@ class ConfigManager:
                                device.device_name)
             seen.add(device.id)
 
-    def _quarantine(self, raw: str) -> None:
+    def _quarantine(self, raw: str) -> bool:
+        """Preserve an unreadable config. True if it is safely on disk.
+
+        **The return value is load-bearing.** If this fails, the operator's
+        original bytes exist in exactly one place -- the file we are about to
+        replace with defaults -- so the caller must stop the overwrite rather
+        than continue and hope.
+
+        This used to swallow the `OSError` entirely, which lost the config
+        unrecoverably and said nothing: the operator saw an application that
+        had come up with three default devices. The failure is not
+        hypothetical here either. `tests/conftest.py` names the causes in this
+        codebase's own words -- "handle churn, or a scanner holding it" -- and
+        this tree is OneDrive-hosted with Defender live, so a transient
+        `OSError` on a write is a real event rather than a theoretical one.
+        """
         backup = self.path.with_suffix(self.path.suffix + ".corrupt")
         try:
             backup.write_text(raw, encoding="utf-8")
-            logger.info("config: unreadable file preserved as %s", backup)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.error(
+                "config: could not preserve the unreadable %s as %s (%s). "
+                "Saving is disabled for this session so the original is not "
+                "overwritten -- copy it aside by hand before changing any "
+                "device.",
+                self.path, backup, exc, exc_info=True,
+            )
+            return False
+        logger.info("config: unreadable file preserved as %s", backup)
+        return True
 
     # -- save --------------------------------------------------------------
 
@@ -271,7 +301,27 @@ class ConfigManager:
             self.save_now()
 
     def save_now(self) -> bool:
-        """Write the config atomically. Returns True on success."""
+        """Write the config atomically. Returns True on success.
+
+        Refuses outright while `_preserve_failed` is set. That trade is
+        deliberate: losing this session's edits is recoverable, and
+        overwriting an unreadable original whose only copy is on disk is not.
+        """
+        if self._preserve_failed:
+            logger.error(
+                "config: refusing to save. %s could not be read and could not "
+                "be preserved either, so it is the only copy of the "
+                "operator's device list -- writing defaults over it would "
+                "destroy it. Copy the file aside, then restart.",
+                self.path,
+            )
+            self._notify_save_error(RuntimeError(
+                f"{self.path} is unreadable and could not be backed up. "
+                f"Saving is disabled so the file is not overwritten. Copy it "
+                f"aside and restart."
+            ))
+            return False
+
         with self._lock:
             payload = json.dumps(self.to_dict(), indent=2) + "\n"
             try:
@@ -298,11 +348,8 @@ class ConfigManager:
                 self._save_failures += 1
                 logger.error("config: save to %s failed (%s)", self.path, exc)
                 # Only escalate to the operator once it is clearly persistent.
-                if self._save_failures in (3, 30) and self.on_save_error:
-                    try:
-                        self.on_save_error(exc)
-                    except Exception:
-                        logger.exception("config: save-error callback raised")
+                if self._save_failures in (3, 30):
+                    self._notify_save_error(exc)
                 return False
 
             if self._save_failures:
@@ -311,6 +358,20 @@ class ConfigManager:
             self._save_failures = 0
             logger.debug("config: saved %d device(s)", len(self.devices))
             return True
+
+    def _notify_save_error(self, exc: Exception) -> None:
+        """Tell the operator, if anyone is listening.
+
+        Extracted so the refusal above reaches the same dialog as a repeated
+        write failure. A log line alone is not surfacing: nothing in the suite
+        configures a file handler, and the operator is not reading stderr.
+        """
+        if self.on_save_error is None:
+            return
+        try:
+            self.on_save_error(exc)
+        except Exception:
+            logger.exception("config: save-error callback raised")
 
     # -- device list -------------------------------------------------------
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -296,3 +297,101 @@ def test_existing_config_is_intact_after_failed_save(config_path, monkeypatch):
     manager.devices[0].device_name = "Should not persist"
     assert manager.save_now() is False
     assert config_path.read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# A quarantine that fails must not lead to the original being overwritten
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.allow_contained_exceptions
+def test_a_failed_quarantine_disables_saving(config_path, monkeypatch):
+    """The original bytes must still be on disk afterwards.
+
+    This is the property that matters, and it is asserted on the file rather
+    than on a flag or a log line: an unreadable config that could not be
+    backed up is the **only** copy of the operator's device list, so writing
+    defaults over it destroys it with nothing to recover from.
+
+    Before the fix, `_quarantine` swallowed the `OSError` and `load` carried
+    on to defaults; the next save -- any device edit, or the shutdown flush --
+    replaced the file. The operator saw an application that had come up with
+    three default devices and no indication anything had been lost.
+
+    Marked `allow_contained_exceptions` because the product now *deliberately*
+    logs the failed backup with `exc_info` at ERROR. That is the fix, not a
+    latent bug: the exception is caught, reported, and acted on by refusing to
+    save. The autouse guard cannot distinguish "caught and acted on" from
+    "caught and swallowed", so the marker says which this is.
+
+    Dies on: `_quarantine` swallowing the error again, or `save_now` writing
+    while `_preserve_failed` is set.
+    """
+    original = '{ this is not json '
+    config_path.write_text(original)
+
+    def refuse_backup(*args, **kwargs):
+        raise OSError(13, "Permission denied")
+
+    # Only the .corrupt write fails; the real save path stays intact so the
+    # test proves saving is *refused* rather than merely broken.
+    monkeypatch.setattr(pathlib.Path, "write_text", refuse_backup)
+
+    manager = ConfigManager(config_path)
+    manager.load()
+    monkeypatch.undo()
+
+    assert len(manager.devices) == 3, "still falls back to defaults"
+    assert not config_path.with_suffix(".json.corrupt").exists(), (
+        "the backup was supposed to fail in this test"
+    )
+
+    assert manager.save_now() is False, "saving must be refused"
+    assert config_path.read_text() == original, (
+        "the unreadable original was overwritten -- this is the data loss the "
+        "fix exists to prevent"
+    )
+
+
+@pytest.mark.allow_contained_exceptions
+def test_a_failed_quarantine_reaches_the_operator(config_path, monkeypatch):
+    """A log line is not surfacing; the callback is.
+
+    Nothing in the suite configures a file handler and the operator is not
+    reading stderr, so `on_save_error` is the only route by which a refusal
+    becomes visible. Without it the fix would protect the file and still leave
+    someone wondering why their edits vanish.
+
+    Dies on: `save_now` returning False without notifying.
+    """
+    config_path.write_text('{ this is not json ')
+    monkeypatch.setattr(pathlib.Path, "write_text",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError(13, "denied")))
+    manager = ConfigManager(config_path)
+    manager.load()
+    monkeypatch.undo()
+
+    seen: list[Exception] = []
+    manager.on_save_error = seen.append
+    manager.save_now()
+
+    assert len(seen) == 1, "the operator was never told"
+    assert "unreadable" in str(seen[0]) and str(config_path) in str(seen[0])
+
+
+def test_a_successful_quarantine_still_allows_saving(config_path):
+    """The negative control: the refusal must be specific to the failure.
+
+    Without this, disabling saves unconditionally on any malformed config
+    would pass the two tests above while breaking every normal recovery --
+    the file *was* preserved, so there is nothing left to protect.
+    """
+    config_path.write_text('{ this is not json ')
+    manager = ConfigManager(config_path)
+    manager.load()
+
+    assert config_path.with_suffix(".json.corrupt").exists()
+    assert manager.save_now() is True, (
+        "the original was preserved, so saving must be allowed"
+    )
+    assert json.loads(config_path.read_text())["devices"], "defaults written"
