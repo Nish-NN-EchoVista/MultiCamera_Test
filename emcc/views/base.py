@@ -52,7 +52,27 @@ class StandaloneCtx:
 class DeviceView(Protocol):
     """The surface the host routes through. See `VIEW_CONTRACT.md`."""
 
-    #: Identifies the view in logs and in the host's registry.
+    #: NOT used for lookup or for logging, and must not become so.
+    #:
+    #: `ViewHost` keys `_factories`, `_views` and `_call`'s incident record on
+    #: the name passed to `register()`, never on this attribute. As of
+    #: 343341e it has **zero reads** in `emcc/`, `tools/` and `tests/` -- the
+    #: last one was an equality assertion in `test_dashboard_view.py`, and
+    #: only the annotation here and the two class assignments remain.
+    #:
+    #: An earlier version of this comment said it "identifies the view in
+    #: logs and in the host's registry". False in both halves, and recorded
+    #: rather than quietly replaced because it read as a specification: the
+    #: next person to make it true would have been implementing a described
+    #: contract, not adding one.
+    #:
+    #: Implementing it as described would be actively worse than the gap. The
+    #: host logs the key it looked the view up by, which is correct by
+    #: construction; logging `self.name` would let a view with a wrong or
+    #: duplicated name misidentify itself in the incident record -- the one
+    #: document you consult precisely when a view is misbehaving.
+    #:
+    #: Whether the attribute should exist at all is open (Q10).
     name: str
 
     @property
