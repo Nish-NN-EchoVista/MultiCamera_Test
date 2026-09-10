@@ -70,19 +70,28 @@ emerald.
 
 | Property | Value | Source |
 |---|---|---|
+<!-- BEGIN GENERATED: metrics -->
 | Title bar height | 52 | `h-[52px]` |
 | Card min height | 142 | `min-h-[142px]` |
 | Card radius | 12 | `rounded-xl` |
 | Control radius | 8 | `rounded-lg` |
-| Badge radius | 4 / 6 | `rounded` / `rounded-md` |
 | Page padding | 32 x, 16 y | `px-8 py-4` |
 | Card gap | 12 | `gap-3` |
 | Card padding | 20 x | `px-5` |
 | Label→control gap | 10 | `gap-2.5` |
 | Column widths | 188 / 176 / 162 / flex / 148 | `w-[...]` |
-| Separator | 1px, 4px margins | `w-px mx-1` |
 | Scroll threshold | 4 devices | `devices.length >= 4` |
+<!-- END GENERATED: metrics -->
+| Badge radius | 4 / 6 | `rounded` / `rounded-md` |
+| Separator | 1px, 4px margins | `w-px mx-1` |
 | Capacity | none | the export's "supports up to 25" was a demo limit; removed |
+
+The first ten rows are generated from `theme.py` by `tools/gen_ui_spec.py`.
+The three below the marker are hand-written because they are not `theme`
+constants: `Separator`'s 1px and 4px are literals in `device_card.py`,
+`Capacity` is prose, and `Badge radius` says `4 / 6` where `theme` has only
+`BADGE_RADIUS = 4` -- generating it would rewrite content rather than refresh
+a value, so it is left alone and flagged.
 
 Inner column insets are reproduced as designed: the section *labels* sit flush
 to each column's left edge while the controls below them are inset (`px-4` on
@@ -221,11 +230,19 @@ A device card is ~88 CustomTkinter widgets, and essentially all of the cost is
 Tcl round-trips (a profile attributes ~0.76s of tottime to
 `_tkinter.tkapp.call`). Three things follow from that, all of them load-bearing:
 
+> **On the figures in this section.** The *counts* -- ~88 widgets and the ~24
+> grouping frames below -- were re-verified on 2026-09-10 and are exact;
+> counting is method-independent. The *timings* were measured against code
+> that has since been removed, and they predate this project's git history,
+> so the date they were taken is not recoverable. Read them as the record of
+> why the current design won, not as reproducible measurements.
+
 1. **Never rebuild the list to add one row.** The original `_rebuild()`
    destroyed and recreated every card on every add: 3.0s for the 4th device
    rising to 8.0s for the 11th, plus a visible full-list flash.
-   `DeviceStore.subscribe_added` reports the single new device so `App` inserts
-   one card `before=` the add button. Now flat at ~0.75s regardless of count,
+   `DeviceManager.add_device` returns the single new device and
+   `App._add_device` inserts one card through `ListView.new_card`, `before=`
+   the add button. Now flat at ~0.75s regardless of count,
    and existing cards are pixel-identical across an add.
 2. **The add button and scroll hint are created once.** They are permanent
    children, shown/hidden rather than rebuilt.
@@ -243,13 +260,27 @@ Also: `_set_scrollbar_visible` is guarded on current state, because re-applying
 inside a `CTkScrollableFrame` changes the scrollregion every frame, which calls
 `CTkScrollbar.set` -> `_draw` and cascades a `_draw` over every descendant
 frame. That is more work *per frame* than building the whole card, so the
-"smooth" reveal was measurably jankier than a single-shot insert.
+"smooth" reveal was measurably jankier than a single-shot insert. (Measured
+against code since removed; date not recoverable. The same claim appears in
+`device_card.py`'s "no reveal/grow animation" note -- the two were written
+together, so neither corroborates the other.)
 
 **Remaining headroom, not taken:** ~24 of the 88 widgets per card are
 transparent border-less `CTkFrame`s used purely for grouping, and they render
-nothing. A `CTkFrame(fg_color="transparent")` costs 2.101ms to construct
-against 0.011ms for a `tk.Frame` -- a 190x difference, so swapping them would
-cut a meaningful slice of the remaining ~0.75s. It was left alone deliberately:
+nothing. A `CTkFrame(fg_color="transparent")` costs materially more to
+construct than a raw `tk.Frame` -- enough that swapping those 24 would cut a
+real slice of the remaining build cost.
+
+**The size of that gap is method-dependent and should not be quoted as a
+single number.** Measured 2026-09-10 (Worker 2, CustomTkinter 5.2.2, 200
+constructions per run): `CTkFrame(fg_color="transparent")` takes 5-8ms
+depending on whether widgets are destroyed between constructions and whether
+the parent is reused; `tk.Frame` is below ~0.02ms, at the resolution floor,
+where run-to-run variation is the same order as the value being measured. The
+ratio across those methods spans **3x to 744x**. Nothing in the codebase
+depends on which end of that range is right -- the decision below holds at 3x.
+
+It was left alone deliberately:
 CustomTkinter applies widget scaling inside its own `pack`/`place`/`grid`
 overrides, so every pad, width and height on a raw `tk` widget would need
 scaling by hand, and getting one wrong is a silent fidelity regression on a

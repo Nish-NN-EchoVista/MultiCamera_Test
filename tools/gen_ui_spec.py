@@ -117,10 +117,54 @@ def render(name: str, module=theme) -> list[str]:
         for label, source, accessor in BLENDS:
             rows.append(f"| {label} | `{source}` | `{accessor(module)}` |")
         return rows
+    if name == "metrics":
+        # No header row: this block sits INSIDE an existing table whose
+        # header and three hand-written rows live outside the markers.
+        return [f"| {label} | {accessor(module)} | `{source}` |"
+                for label, source, accessor in METRICS]
     raise KeyError(name)
 
 
-BLOCKS = ("surfaces", "blends")
+#: Metrics: (row label, source markup, accessor). Only rows whose value is
+#: a `theme` constant. Three rows of that table are deliberately OUTSIDE the
+#: generated block and stay hand-written:
+#:
+#:   Badge radius   the doc says "4 / 6"; theme has only BADGE_RADIUS = 4, so
+#:                  generating it would silently rewrite content rather than
+#:                  refresh a value. Flagged, not resolved here.
+#:   Separator      1px and its 4px margins are literals in device_card.py,
+#:                  not theme constants. Transcribing them into this file
+#:                  would move the staleness rather than remove it.
+#:   Capacity       prose.
+METRICS = [
+    ("Title bar height",   "h-[52px]",              lambda t: t.TITLEBAR_H),
+    ("Card min height",    "min-h-[142px]",         lambda t: t.CARD_MIN_H),
+    ("Card radius",        "rounded-xl",            lambda t: t.CARD_RADIUS),
+    ("Control radius",     "rounded-lg",            lambda t: t.CTRL_RADIUS),
+    ("Page padding",       "px-8 py-4",
+     lambda t: f"{t.PAGE_PAD_X} x, {t.PAGE_PAD_Y} y"),
+    ("Card gap",           "gap-3",                 lambda t: t.CARD_GAP),
+    ("Card padding",       "px-5",                  lambda t: f"{t.CARD_PAD_X} x"),
+    ("Label→control gap", "gap-2.5",           lambda t: t.SECTION_GAP),
+    ("Column widths",      "w-[...]",
+     lambda t: f"{t.COL_NAME} / {t.COL_IP} / {t.COL_CONN} / flex / {t.COL_TEMP}"),
+    ("Scroll threshold",   "devices.length >= 4",
+     lambda t: f"{t.SCROLL_THRESHOLD} devices"),
+]
+
+
+#: The one place a block is declared. `BLOCKS` and every row count derive
+#: from this, because the first version hardcoded `("surfaces", "blends")`
+#: and a row total of `len(SURFACES) + len(BLENDS)` -- so adding `metrics`
+#: left the tool reporting "35 rows" while generating 45, and the self-test
+#: reporting 8 metric rows against 10, from a "minus 2 for the header" that
+#: metrics does not have. Transcription rot, in the tool written to remove it.
+SPECS = {"surfaces": SURFACES, "blends": BLENDS, "metrics": METRICS}
+BLOCKS = tuple(SPECS)
+
+
+def row_count() -> int:
+    return sum(len(spec) for spec in SPECS.values())
 
 
 def _bounds(text: str, name: str) -> tuple[int, int]:
@@ -182,7 +226,7 @@ def scope_report(text: str) -> str:
     """
     covered, uncovered = coverage(text)
     total = len(covered) + len(uncovered)
-    rows = len(SURFACES) + len(BLENDS)
+    rows = row_count()
     lines = [
         f"{SPEC.name}: verified {len(covered)} of {total} sections "
         f"({', '.join(covered)}) -- {rows} rows current.",
@@ -279,9 +323,9 @@ def self_test() -> int:
     ok &= restored == once
 
     for name in BLOCKS:
-        rows = render(name)
-        print(f"  block '{name}' renders {len(rows) - 2} rows")
-        ok &= len(rows) > 2
+        declared = len(SPECS[name])
+        print(f"  block '{name}' renders {declared} rows")
+        ok &= declared > 0 and len(render(name)) >= declared
 
     # Guard the scope report itself: an empty or total "covered" list would
     # make the honesty line a lie in either direction.
