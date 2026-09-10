@@ -20,6 +20,7 @@ Usage:
 """
 
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -46,6 +47,13 @@ if len(sys.argv) < 2:
     sys.exit(f"usage: python {pathlib.Path(__file__).name} out_dir")
 OUT = pathlib.Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
+
+#: The app's own Clean fuse, raised so it cannot fire mid-pass. See the note
+#: at the mock setup. Overridable rather than hard-coded so the mechanism can
+#: be reproduced on demand: `EMCC_VISUAL_CLEAN_TIMEOUT=0.5` makes the timer
+#: fire during the pass and the affected states render Clean-off, which is the
+#: positive control for the diagnosis.
+CLEAN_TIMEOUT_S = float(os.environ.get("EMCC_VISUAL_CLEAN_TIMEOUT", "9999"))
 setup_logging(console=False, log_dir=pathlib.Path(tempfile.mkdtemp()))
 
 work = pathlib.Path(tempfile.mkdtemp())
@@ -169,10 +177,28 @@ def run():
     # forgotten.
     pump(4)
 
-    # No periodic temperature stream and no self-completing sweep: every
-    # reading is pushed by hand, so a state cannot expire before the shutter.
+    # Nothing may expire between a state being set up and its shutter, and
+    # there are TWO clocks to stop, not one. Stopping only the mock's is what
+    # left four states nondeterministic.
+    #
+    # The mock's clocks first: no periodic temperature stream and no
+    # self-completing sweep, so every reading is pushed by hand.
+    #
+    # But `clean_duration_s=99` does not hold Clean active for 99s -- it
+    # guarantees the DEVICE never finishes, which hands the ending to the
+    # APP's own fuse, `clean_timeout_s`, default 10s:
+    # `device_manager._restart_clean_timer` schedules `_on_clean_timeout`,
+    # which clears `clean_active` and repaints. State 04 starts the clean, so
+    # 05, both 06 crops and 03b rendered `ON_*` or `CLEAN_OFF_*` depending on
+    # where the pass crossed 10s of wall clock. Bistable, 12,884 px in a
+    # 182x72 box, and it MOVED BETWEEN STATES as the pass got faster -- which
+    # is why it read as a different finding each time it was measured.
+    #
+    # The comment this replaces asserted a state "cannot expire before the
+    # shutter". It was the app's own timer that expired them.
     mock = MockNPort(MockConfig(temp_interval_s=99, clean_duration_s=99)).start()
     app.config_manager.settings.tcp_port = mock.port
+    app.config_manager.settings.clean_timeout_s = CLEAN_TIMEOUT_S
     cams = app.manager.devices[:3]
     unreachable = app.manager.devices[3]
 
@@ -227,6 +253,10 @@ def run():
     wait(lambda: not cams[0].temperature_alert)
     dismiss_any()
     results.append(("alert_chip_hidden", not app.title_bar._alert_wrap.winfo_ismapped()))
+    # Checked here, at the LAST state that depends on it: `_on_clean_timeout`
+    # clears the flag permanently, so a fire anywhere in 04..03b is still
+    # visible at this point. One check covers the whole window.
+    results.append(("clean_still_active", cams[0].clean_active))
     grab("03b_alert_cleared")
 
     # 07 -- confirm-remove dialog layout.
@@ -275,6 +305,21 @@ app.mainloop()
 print()
 for name, value in results:
     print(f"  {name}: {value}")
+
+# A fired Clean fuse is not a failed capture -- the images exist and look
+# entirely plausible. They are simply of a different state, and four of them
+# will not match a baseline taken with the fuse held. That is exactly how it
+# went unnoticed: a wrong-state image reads as a pass, and then as a diff
+# against the next run. So it exits non-zero like a blank frame does, rather
+# than printing `False` in a list nobody reads twice.
+if any(name == "clean_still_active" and value is False for name, value in results):
+    print()
+    print("  INVALID PASS -- the app's Clean fuse fired before the shutter.")
+    print(f"    clean_timeout_s was {CLEAN_TIMEOUT_S}s and state 04 starts the")
+    print("    clean. 05, both 06 crops and 03b render Clean-OFF and will")
+    print("    differ from any baseline captured with it held, by ~12,884px in")
+    print("    a 182x72 box. Raise EMCC_VISUAL_CLEAN_TIMEOUT and re-run.")
+    sys.exit(1)
 
 if failures:
     print()
