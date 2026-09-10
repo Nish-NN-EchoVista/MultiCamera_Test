@@ -503,6 +503,9 @@ class App(ctk.CTk):
         offset = self._offsets.get(False)   # a new device is never in alert
         card = self._view().new_card(device, first=len(self._cards) == 1,
                                     label_offset=offset)
+        # The list view was updated in place just now; every other view is
+        # behind and must be reseeded when it is next shown.
+        self.views.note_device_set_changed()
         self._refresh_chrome()
         if offset is None:
             self.after_idle(lambda: self._settle(card))
@@ -553,6 +556,7 @@ class App(ctk.CTk):
         if card is not None:
             card.destroy()
         self._repack_first_card()
+        self.views.note_device_set_changed()
         self._refresh_chrome()
 
     def _repack_first_card(self) -> None:

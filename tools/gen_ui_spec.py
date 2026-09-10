@@ -142,6 +142,60 @@ def _bounds(text: str, name: str) -> tuple[int, int]:
     return begin[0].end(), end[0].start()
 
 
+SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
+
+
+def coverage(text: str) -> tuple[list[str], list[str]]:
+    """-> (sections this tool verifies, sections it does not).
+
+    Both lists are DERIVED from the document. The covered set is found by
+    locating each generated block and walking back to the heading above it;
+    the uncovered set is every other `##` heading.
+
+    Neither is transcribed, and that is not fastidiousness. A hand-written
+    list here would go stale the first time someone adds a section -- which
+    is precisely the failure this tool exists to remove, reproduced inside
+    the tool built to remove it. When this was written by hand in a message,
+    the count was 17; the document has 18.
+    """
+    sections = [(m.group(1).strip(), m.start()) for m in SECTION_RE.finditer(text)]
+    covered: list[str] = []
+    for name in BLOCKS:
+        start, _ = _bounds(text, name)
+        above = [title for title, offset in sections if offset < start]
+        if above:
+            covered.append(above[-1])
+    named = set(covered)
+    uncovered = [title for title, _ in sections if title not in named]
+    return covered, uncovered
+
+
+def scope_report(text: str) -> str:
+    """What was verified, and -- the point -- what was not.
+
+    The old message was `"UI_SPEC.md is up to date"`. True of two blocks,
+    phrased about the file, and identical whether the tool had checked a
+    region or never looked at it. Silence that cannot distinguish "clean"
+    from "did not look" is the failure mode this project keeps finding in
+    its own instruments; an instrument that cannot say "I did not look
+    there" invites its silence to be read as absence of drift.
+    """
+    covered, uncovered = coverage(text)
+    total = len(covered) + len(uncovered)
+    rows = len(SURFACES) + len(BLENDS)
+    lines = [
+        f"{SPEC.name}: verified {len(covered)} of {total} sections "
+        f"({', '.join(covered)}) -- {rows} rows current.",
+    ]
+    if uncovered:
+        lines.append(
+            "NOT checked by this tool, may be stale: "
+            + ", ".join(uncovered)
+            + f" ({len(uncovered)} sections)"
+        )
+    return chr(10).join(lines)
+
+
 def generate(text: str, newline: str, module=theme) -> str:
     """Return `text` with every generated block rewritten."""
     for name in BLOCKS:
@@ -182,15 +236,18 @@ def main() -> int:
     if args.check:
         if updated != text:
             print(f"{SPEC.name} is OUT OF DATE -- run: py tools/gen_ui_spec.py")
+            print(scope_report(text))
             return 1
-        print(f"{SPEC.name} is up to date ({len(SURFACES) + len(BLENDS)} rows).")
+        print(scope_report(text))
         return 0
 
     if updated == text:
-        print(f"{SPEC.name} already up to date; nothing written.")
+        print(f"{SPEC.name}: generated blocks already current; nothing written.")
+        print(scope_report(text))
         return 0
     SPEC.write_bytes(updated.encode("utf-8"))
-    print(f"{SPEC.name} regenerated ({len(SURFACES) + len(BLENDS)} rows).")
+    print(f"{SPEC.name} regenerated.")
+    print(scope_report(updated))
     return 0
 
 
@@ -225,6 +282,16 @@ def self_test() -> int:
         rows = render(name)
         print(f"  block '{name}' renders {len(rows) - 2} rows")
         ok &= len(rows) > 2
+
+    # Guard the scope report itself: an empty or total "covered" list would
+    # make the honesty line a lie in either direction.
+    covered, uncovered = coverage(text)
+    headings = len(SECTION_RE.findall(text))
+    partitions = len(covered) + len(uncovered) == headings
+    print(f"  coverage partitions all {headings} headings : {partitions}")
+    print(f"  covered non-empty, uncovered non-empty  : "
+          f"{bool(covered) and bool(uncovered)}")
+    ok &= partitions and bool(covered) and bool(uncovered)
 
     print("SELF-TEST", "PASS" if ok else "FAIL")
     return 0 if ok else 1

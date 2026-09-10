@@ -1596,3 +1596,113 @@ def test_the_host_refresh_is_not_contained():
         "the failure was contained and recorded rather than raised -- the "
         "chrome path must stay loud"
     )
+
+
+def _reseeds(app):
+    """Record which views get `set_devices`, without disturbing the host."""
+    seen: list[str] = []
+    original = app.views._call
+
+    def watched(name, method, *args):
+        if method == "set_devices":
+            seen.append(name)
+        return original(name, method, *args)
+
+    app.views._call = watched
+    return seen, (lambda: setattr(app.views, "_call", original))
+
+
+def test_an_idle_switch_does_not_reseed(app):
+    """Switching with nothing changed must not rebuild anything.
+
+    `_hide_active` used to dirty unconditionally, so every switch back ran a
+    full `set_devices`. For `ListView` that is a teardown and progressive
+    rebuild of every card -- measured at 3596-3626ms of blocked call at 25
+    devices and 790-928ms at four, with the fleet idle. The comment above it
+    described the intent ("anything arriving while hidden marks it dirty")
+    while the code dirtied whether or not anything had arrived.
+
+    Settling time is not quoted here either, and see `ViewHost._hide_active`
+    for why: an earlier draft cited a settle figure that the measuring
+    harness could not actually support.
+
+    Dies on: `_hide_active` dirtying again.
+    """
+    _pump(app, 4)
+    app._switch_view("dashboard")
+    _pump(app, 4)
+
+    seen, restore = _reseeds(app)
+    try:
+        app._switch_view("list")
+        _pump(app, 4)
+        app._switch_view("dashboard")
+        _pump(app, 4)
+        app._switch_view("list")
+        _pump(app, 4)
+    finally:
+        restore()
+
+    assert seen == [], f"reseeded {seen} across three idle switches"
+
+
+def test_a_device_added_while_hidden_still_reseeds(app):
+    """The other half: a view that missed a change must be reseeded.
+
+    Dropping the dirty-on-hide without this would be a regression rather than
+    a fix. Measured before the change: with the list active, `_add_device`
+    left the hidden Dashboard's `_devices` at the old count -- nothing informs
+    it, because the shell mutates the list view directly through `new_card`
+    and the host's own `add_device` routing has no callers. The reseed on
+    switch-back was the only thing correcting it.
+
+    So the dirty now comes from the change rather than from the hide.
+
+    Dies on: dropping `note_device_set_changed` from `_add_device`, or
+    narrowing it to skip inactive views.
+    """
+    _pump(app, 4)
+    app._switch_view("dashboard")
+    _pump(app, 4)
+    dashboard = app.views.active
+    before = len(dashboard._devices)
+
+    app._switch_view("list")
+    _pump(app, 4)
+    app._add_device()
+    _pump(app, 4)
+
+    assert "dashboard" in app.views._dirty, (
+        "the hidden view was not told the device set changed, so it will "
+        "render a stale grid when shown"
+    )
+
+    seen, restore = _reseeds(app)
+    try:
+        app._switch_view("dashboard")
+        _pump(app, 4)
+    finally:
+        restore()
+
+    assert seen == ["dashboard"], f"expected a dashboard reseed, got {seen}"
+    assert len(dashboard._devices) == before + 1
+
+
+def test_the_active_view_is_not_dirtied_by_its_own_change(app):
+    """The view that made the change is already correct.
+
+    Dirtying it too would reinstate the rebuild this fix removes -- the next
+    switch away and back would reseed even though nothing was missed.
+
+    Dies on: `note_device_set_changed` dirtying every view rather than the
+    inactive ones.
+    """
+    _pump(app, 4)
+    assert app.views.active_name == "list"
+
+    app._add_device()
+    _pump(app, 4)
+
+    assert "list" not in app.views._dirty, (
+        "the active view was dirtied by a change it applied itself"
+    )

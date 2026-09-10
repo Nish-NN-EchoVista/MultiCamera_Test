@@ -145,9 +145,30 @@ class ViewHost:
         self._call(name, "hide")
         if view is not None:
             view.widget.pack_forget()
-        # Anything arriving while hidden marks it dirty rather than being
-        # delivered, so it reconciles on the way back in.
-        self._dirty.add(name)
+        # Deliberately NOT dirtied here.
+        #
+        # Dirtying on hide made every switch back a full `set_devices`, and
+        # for `ListView` that is a teardown and progressive rebuild of every
+        # card. Measured with the fleet idle and nothing whatsoever changed:
+        # the switch to List blocked for **3596-3626ms at 25 devices** and
+        # **790-928ms at four**, against 79-86ms and 6-15ms after this change.
+        #
+        # Settling time is deliberately **not** quoted. It was not reliably
+        # measurable: the harness pumps `update()` in a loop, and at 25
+        # devices each pump is slow enough that the loop's own cost dominates
+        # -- it overran a 3s budget to 5.3s, which only the instrument can
+        # explain. An earlier version of this comment cited "10s of settling"
+        # and that figure is **withdrawn**; anyone wanting it must measure it
+        # some other way. The
+        # comment this replaces described the intent -- "anything arriving
+        # while hidden marks it dirty" -- while the code dirtied regardless
+        # of whether anything had arrived.
+        #
+        # A view now goes dirty when the device **set** actually changes
+        # while it is not active: see `note_device_set_changed`. Device
+        # *state* -- connect, temperature, fault -- reaches only the active
+        # view via `render_device`, which never dirties, so a merely busy
+        # fleet no longer forces a rebuild either.
         self._active_name = None
 
     # -- routing ---------------------------------------------------------
@@ -182,6 +203,25 @@ class ViewHost:
                 continue
             self._call(name, "remove_device", device_id)
             self._call(name, "on_device_count_changed", total)
+
+    def note_device_set_changed(self) -> None:
+        """A device was added or removed: every inactive view is now behind.
+
+        The active view is updated in place by whoever made the change, so it
+        stays clean. Every other view is marked dirty and gets the whole
+        truth via `set_devices` when next shown -- never a partial update
+        applied to a stale set, which is the rule recorded in
+        `decisions.json`.
+
+        This exists because the host's own `add_device`/`remove_device`
+        routing has **no callers**: the shell mutates the list view directly
+        through `new_card`. Until that is wired, this is what tells the other
+        views they have missed something, and without it dropping the
+        dirty-on-hide would leave a hidden Dashboard rendering a stale grid.
+        """
+        for name in self._views:
+            if name != self._active_name:
+                self._dirty.add(name)
 
     def set_devices(self, devices: Sequence[DeviceState]) -> None:
         """Re-seed the active view; mark the rest dirty rather than updating."""
