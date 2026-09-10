@@ -280,6 +280,18 @@ LOGO_FG = BLUE_400
 EMCC_BG = over(BLUE_600, TITLEBAR_BG, 0.18)
 EMCC_BORDER = over(BLUE_500, TITLEBAR_BG, 0.25)
 EMCC_TEXT = over(BLUE_400, EMCC_BG, 0.90)
+#: The badge's geometry and letter-spacing, here rather than in the Metrics
+#: block because this file is organised by component below `Metrics` and these
+#: complete one element: the three colours above are the same badge.
+#:
+#: Both are DISTINCT constants despite tempting neighbours, and deliberately so.
+#: `BADGE_RADIUS` is 4 -- a different value under a name that reads like it
+#: would fit. `HEADING_TRACKING` in `shell/subheader.py` is also 0.12, but it
+#: specifies the sub-header heading; the values coincide and the elements do
+#: not, so binding them would make a later change to one silently move the
+#: other.
+EMCC_RADIUS = 6              # rounded-md
+EMCC_TRACKING = 0.12         # tracking-wider
 
 HEADER_ALERT_TEXT = over(RED_400, TITLEBAR_BG, 0.80)
 ONLINE_DOT = EMERALD_400
