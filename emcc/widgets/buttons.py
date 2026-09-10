@@ -40,6 +40,49 @@ from .interactive import Interactive
 from .toggle import AutoToggle
 
 
+#: Sentinel for "this property has never been written", distinct from any
+#: value a caller could legitimately pass.
+_NEVER = object()
+
+
+def _paint_diff(owner, widget, **props) -> None:
+    """`widget.configure(**props)`, minus the properties already at that value.
+
+    A no-op re-render of one card issued **24** redundant `configure` calls,
+    measured, costing **21.8 ms** of Tcl round-trips against a 1.3 ms floor --
+    544 ms across 25 cards, more than five times the 100 ms pump budget.
+
+    **This caches a belief about widget state, which is the pattern F11
+    deleted one layer up tonight**: `ViewHost` cached which view was behind,
+    the belief went wrong, and the Dashboard stayed silently stale. F11's
+    remedy was to observe instead of remember -- but observing here means
+    `cget()` per property, which is itself the round-trip being saved, so
+    caching is the only option and its safety has to be argued rather than
+    designed away.
+
+    **It rests on `_paint` being the sole writer of every property it sets.**
+    Verified by AST over `buttons.py` and `interactive.py`: of 23
+    (receiver, property) pairs, the 19 that `_paint` writes have `_paint` as
+    their only writer. The other 4 are disjoint -- `TempButton._caption`'s
+    text and colour belong to `_sync_alert` alone, and `cursor` to
+    `Interactive` -- so neither can stale this cache. **Re-check that if a
+    second writer is ever added**; the failure is silent and in the direction
+    that looks correct.
+
+    Images are deliberately not routed through here. `icons.get()` returns a
+    fresh object per call, so an identity or equality test would never match
+    and the diff would buy nothing while adding a way to keep a stale icon.
+    `CleanButton` already guards its icon with `_icon_visible`.
+    """
+    cache = owner.__dict__.setdefault("_painted", {})
+    changed = {k: v for k, v in props.items()
+               if cache.get((widget, k), _NEVER) != v}
+    if changed:
+        widget.configure(**changed)
+        for k, v in changed.items():
+            cache[(widget, k)] = v
+
+
 class ConnectionButton(ctk.CTkFrame):
     """Connect / Connecting / Connected / Reconnecting / Reconnect.
 
@@ -94,14 +137,16 @@ class ConnectionButton(ctk.CTkFrame):
         visual = self._visual()
         colours = theme.CONN[visual.style]
 
-        self._button.configure(
+        _paint_diff(
+            self, self._button,
             fg_color=colours["bg_hover"] if self._hovered else colours["bg"],
             border_color=colours["ring"],
         )
-        self._label.configure(text=visual.label, text_color=colours["text"])
-        self._caption.configure(text=visual.caption,
-                                text_color=colours["caption_color"])
-        self._dot.configure(fg_color=colours["dot"])
+        _paint_diff(self, self._label, text=visual.label,
+                    text_color=colours["text"])
+        _paint_diff(self, self._caption, text=visual.caption,
+                    text_color=colours["caption_color"])
+        _paint_diff(self, self._dot, fg_color=colours["dot"])
         self._style = visual.style
 
     def render(self) -> None:
@@ -161,8 +206,8 @@ class CleanButton(ctk.CTkFrame):
 
     def _paint(self) -> None:
         fill, border, text = self._colours()
-        self.configure(fg_color=fill, border_color=border)
-        self._label.configure(text_color=text)
+        _paint_diff(self, self, fg_color=fill, border_color=border)
+        _paint_diff(self, self._label, text_color=text)
 
         active = self._device.clean_active
         if active != self._icon_visible:
@@ -224,8 +269,8 @@ class AutoButton(ctk.CTkFrame):
                       else theme.AUTO_OFF_BORDER)
             text = (theme.AUTO_OFF_TEXT_HOVER if self._hovered
                     else theme.AUTO_OFF_TEXT)
-        self.configure(fg_color=fill, border_color=border)
-        self._label.configure(text_color=text)
+        _paint_diff(self, self, fg_color=fill, border_color=border)
+        _paint_diff(self, self._label, text_color=text)
 
     def render(self, animate: bool = True) -> None:
         self._paint()
@@ -299,12 +344,14 @@ class TempButton(ctk.CTkFrame):
                       else theme.TEMP_OK_BORDER)
             fill = theme.TEMP_OK_BG_HOVER if self._hovered else theme.INPUT_BG
             value_colour = (theme.TEMP_OK_TEXT if has_reading else theme.TEXT_GHOST)
-            self._hint.configure(
-                text_color=theme.TEXT_LABEL if self._hovered else theme.TEXT_GHOST
+            _paint_diff(
+                self, self._hint,
+                text_color=theme.TEXT_LABEL if self._hovered else theme.TEXT_GHOST,
             )
 
-        self._button.configure(border_color=border, fg_color=fill)
-        self._value.configure(
+        _paint_diff(self, self._button, border_color=border, fg_color=fill)
+        _paint_diff(
+            self, self._value,
             text=(f"{device.latest_temperature:.1f}°C" if has_reading
                   else f"{theme.TEMP_PLACEHOLDER}°C"),
             text_color=value_colour,
