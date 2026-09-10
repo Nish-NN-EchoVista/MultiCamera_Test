@@ -79,6 +79,10 @@ class ConnectionWorker(threading.Thread):
         self._socket: socket.socket | None = None
         self._assembler = LineAssembler()
 
+        #: Set the first time `_wake` fails, so the warning is emitted
+        #: once rather than on every `send`. See `_wake`.
+        self._wake_failed = False
+
         # Self-pipe: written to wake select() when there is work or we must quit.
         self._wake_r, self._wake_w = socket.socketpair()
         self._wake_r.setblocking(False)
@@ -132,8 +136,32 @@ class ConnectionWorker(threading.Thread):
     def _wake(self) -> None:
         try:
             self._wake_w.send(b"\x01")
-        except OSError:
-            pass
+        except OSError as exc:
+            # Reported, because this failure is a silent *degradation*
+            # rather than a breakage -- the harder kind to notice.
+            #
+            # The loop checks the stop flags at the top of every iteration
+            # and calls `_flush_outgoing` unconditionally, so a lost wake
+            # does not lose the command: it delays it by up to
+            # `_SELECT_TIMEOUT_S`. The module docstring promises the loop
+            # "does not poll", and the comment on that constant calls it
+            # "a safety net rather than a polling interval" -- with the
+            # self-pipe broken it becomes exactly the polling interval
+            # those two lines deny. The application keeps working, one
+            # second slower, and nothing said so.
+            #
+            # Logged once. A dead self-pipe is persistent, and `_wake`
+            # runs on every `send` as well as on `disconnect` and `stop`,
+            # so logging per call would flood the file someone has to
+            # read to find this.
+            if not self._wake_failed:
+                self._wake_failed = True
+                logger.warning(
+                    "%s self-pipe wake failed (%s); commands and stop "
+                    "requests will now be served up to %.0fs late rather "
+                    "than at once, for the life of this worker",
+                    self._tag(), exc, _SELECT_TIMEOUT_S,
+                )
 
     def _drain_wake(self) -> None:
         try:

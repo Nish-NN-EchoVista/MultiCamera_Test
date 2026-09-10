@@ -7,6 +7,7 @@ Timing-sensitive settings are shrunk so the suite stays fast.
 
 from __future__ import annotations
 
+import logging
 import queue
 import time
 
@@ -375,3 +376,92 @@ def test_second_client_is_refused_like_a_real_nport():
         assert outcomes, "second worker produced no events"
         stop(second)
         stop(first)
+
+
+# ---------------------------------------------------------------------------
+# The self-pipe
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_self_pipe_wake_is_reported(caplog):
+    """A broken self-pipe degrades the loop silently, so it must be logged.
+
+    `_wake` used to swallow the `OSError`. Nothing broke -- the loop checks
+    the stop flags at the top of each iteration and flushes queued commands
+    unconditionally -- so a lost wake only *delays* work, by up to
+    `_SELECT_TIMEOUT_S`. That is exactly what the module docstring denies
+    ("the loop does not poll") and what the comment on that constant denies
+    ("a safety net rather than a polling interval"). The application keeps
+    running, a second slower, with nothing said.
+
+    **Interrogated before the worker is stopped**, which is the point.
+    `test_send_does_not_block_when_peer_is_silent` has the tightest timing
+    bound in this file and is still blind to this: its 200 sends return
+    immediately either way, because `send` only enqueues, and the lost second
+    lands in `stop()` -- after its assertion.
+
+    No socket and no thread: `_wake` is reachable on an unstarted worker, so
+    this needs neither the mock NPort nor a second of real time.
+
+    Dies on: swallowing the OSError again, or dropping the level below
+    WARNING.
+    """
+    worker, _events = make_worker(1)          # never started, never connected
+    worker._wake_w.close()                    # the write end a dead socket leaves
+
+    with caplog.at_level(logging.WARNING, logger="emcc.device"):
+        worker.send(CMD_CLEAN)
+
+    reported = [r for r in caplog.records if "self-pipe wake failed" in r.getMessage()]
+    assert reported, (
+        "a failed wake was swallowed. The loop still works, one second "
+        "slower, and nothing anywhere says so."
+    )
+    assert reported[0].levelno >= logging.WARNING, (
+        f"reported at {reported[0].levelname}, which the emcc loggers filter"
+    )
+    message = reported[0].getMessage()
+    assert "Camera 1" in message, "the message must identify the device"
+    assert "late" in message, "the message must say what the operator loses"
+
+
+def test_the_self_pipe_warning_is_logged_once_not_per_send(caplog):
+    """A dead self-pipe is persistent, and `send` is called constantly.
+
+    Without the guard this floods the log file that someone has to read to
+    find the warning in the first place -- 200 sends in the sibling timing
+    test would be 200 identical lines.
+
+    Dies on: removing the `_wake_failed` guard.
+    """
+    worker, _events = make_worker(1)
+    worker._wake_w.close()
+
+    with caplog.at_level(logging.WARNING, logger="emcc.device"):
+        for _ in range(25):
+            worker.send(CMD_CLEAN)
+        worker.disconnect()                   # also wakes
+        worker.stop()                         # and so does this
+
+    reported = [r for r in caplog.records if "self-pipe wake failed" in r.getMessage()]
+    assert len(reported) == 1, (
+        f"{len(reported)} warnings from 27 wake attempts -- the once-only "
+        f"guard is gone"
+    )
+
+
+def test_a_healthy_self_pipe_says_nothing(caplog):
+    """The negative control.
+
+    Without it, warning unconditionally would pass both tests above while
+    crying wolf on every command the application ever sends -- and a warning
+    that fires always is read as noise, which is how the real one is missed.
+    """
+    worker, _events = make_worker(1)
+
+    with caplog.at_level(logging.WARNING, logger="emcc.device"):
+        worker.send(CMD_CLEAN)
+
+    assert not [r for r in caplog.records if "self-pipe" in r.getMessage()], (
+        "warned about a working self-pipe"
+    )
