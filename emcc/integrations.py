@@ -114,6 +114,9 @@ def pygui_windows(ip: str) -> list[int]:
     Matched on the marker *and* the IP, so concurrent hand-offs to different
     devices stay distinct. Not filtered on visibility: a hidden window is
     exactly what distinguishes "still building" from "not started".
+
+    The platform guard below exists for the CONTRACT, not for POSIX support.
+    See `pygui_state` for the reason and the evidence.
     """
     if sys.platform != "win32":
         return []
@@ -170,7 +173,30 @@ def pygui_state(ip: str, ignore: "Iterable[int]" = ()) -> "PyGuiState":
     that older window and report READY immediately, dismissing the splash
     while the new instance was still starting.
 
-    Always returns a state, never raises, and reports ABSENT off Windows.
+    Always returns a state and never raises.
+
+    THE PLATFORM GUARD IS FOR THE CONTRACT, NOT FOR POSIX SUPPORT, and an
+    earlier version of this line read "reports ABSENT off Windows" as though
+    that were a supported mode. It is not: **EMCC cannot start off Windows.**
+
+        emcc/splash.py:129-130   `ctypes.windll.user32` at MODULE scope,
+                                 no platform guard
+        ctypes/__init__.py:476   `windll` defined only under
+                                 `if _os.name == "nt"`
+        emcc/app.py:33           imports `splash` at module level
+
+    Those three compose: importing `emcc.app` on POSIX evaluates
+    `ctypes.windll` and raises. Static, and complete on its own -- an attempt
+    to confirm it by deleting `ctypes.windll` and importing was worthless,
+    because leaving `sys.platform == "win32"` made every platform branch take
+    the Windows path and fail for want of a library. That simulates a broken
+    Windows box, not POSIX.
+
+    So the guard is kept for two reasons that survive the app being
+    Windows-only: it preserves "never raises", which callers rely on **on the
+    platform we do ship**, and it is exercised by tests that stub the
+    platform. It is NOT a portability affordance, and deleting it as
+    unreachable would take the contract with it.
     """
     if sys.platform != "win32":
         return PyGuiState.ABSENT
