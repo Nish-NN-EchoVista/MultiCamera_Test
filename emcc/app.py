@@ -99,20 +99,42 @@ class App(ctk.CTk):
         fonts.clear_cache()
         fonts.init()
 
-        self.config_manager = config or ConfigManager()
-        if config is None:
+        # Wired BEFORE `load()`, and at construction where we own the
+        # construction. Both halves matter, for different reasons.
+        #
+        # An injected `config` is already built, so its sink can only be
+        # assigned -- but assigning before `load()` means nothing runs against
+        # an unwired manager either way.
+        #
+        # The window a post-hoc assignment leaves open is currently
+        # UNREACHABLE, and that was measured rather than assumed: `load()`'s
+        # quarantine-failure branch sets `_preserve_failed` and logs, and both
+        # `_notify_save_error` calls live in `save_now()`, which runs later. So
+        # this fixes no live defect. It makes the window unreachable by
+        # construction instead of by accident of what `load()` happens to do.
+        self.config_manager = config or ConfigManager(
+            on_save_error=self._on_config_save_error)
+        if config is not None:
+            self.config_manager.on_save_error = self._on_config_save_error
+        else:
             self.config_manager.load()
-        self.config_manager.on_save_error = self._on_config_save_error
 
         # DeviceManager owns the timers but not Tk: it gets a scheduler.
+        # Composed deliberately: an event means repaint *and* announce.
+        # `_render_device` alone no longer announces -- see shell/pump.py.
+        #
+        # Passed at construction rather than assigned after. The assignment it
+        # replaces was the whole of the wiring, and
+        # `test_scenario_e_timeout_returns_clean_to_blue` was measured as its
+        # sole guard -- 1 failed of 323 with the line deleted. A constructor
+        # argument cannot be dropped without changing a call site the reader
+        # is already looking at.
         self.manager = DeviceManager(
             self.config_manager,
             schedule=lambda delay_ms, fn: self.after(delay_ms, fn),
             cancel=self.after_cancel,
+            on_device_changed=self._on_device_changed,
         )
-        # Composed deliberately: an event means repaint *and* announce.
-        # `_render_device` alone no longer announces -- see shell/pump.py.
-        self.manager.on_device_changed = self._on_device_changed
 
         #: Set by the `list` factory before the host sends `set_devices`,
         #: which is what makes the facade properties below safe during

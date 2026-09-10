@@ -147,7 +147,8 @@ def default_devices() -> list[DeviceConfig]:
 class ConfigManager:
     """Owns `config.json`. The single place that touches it."""
 
-    def __init__(self, path: str | os.PathLike[str] | None = None):
+    def __init__(self, path: str | os.PathLike[str] | None = None, *,
+                 on_save_error: Callable[[Exception], None] | None = None):
         self.path = Path(path) if path is not None else Path("config.json")
         self.settings = Settings()
         self.devices: list[DeviceConfig] = []
@@ -161,7 +162,12 @@ class ConfigManager:
         #: `self.path`, and saving defaults over them would destroy the
         #: operator's device list with nothing left to recover from.
         self._preserve_failed = False
-        self.on_save_error: Callable[[Exception], None] | None = None
+        #: Taken at construction rather than assigned afterwards. `None` is
+        #: a legitimate state -- a headless `ConfigManager` (the tools, most
+        #: of `tests/`) has no operator to tell -- so this cannot be made
+        #: mandatory. What it can do is close the window in which the object
+        #: exists unwired, which is what a post-hoc assignment leaves open.
+        self.on_save_error: Callable[[Exception], None] | None = on_save_error
 
     # -- load --------------------------------------------------------------
 

@@ -90,8 +90,13 @@ class DeviceManager:
         config: ConfigManager,
         schedule: ScheduleFn,
         cancel: CancelFn,
+        on_device_changed: Callable[[str], None] | None = None,
     ):
         self.config = config
+        #: Taken at construction, not assigned afterwards. Replaces a class
+        #: attribute defaulted to `None`: a slot filled by exactly one
+        #: statement elsewhere, with nothing requiring that statement to run.
+        self.on_device_changed = on_device_changed
         self._schedule = schedule
         self._cancel = cancel
 
@@ -371,9 +376,6 @@ class DeviceManager:
     # Event intake
     # ------------------------------------------------------------------
 
-    #: Set by the UI so the manager can request a re-render after changing
-    #: state from a timer.
-    on_device_changed: Callable[[str], None] | None = None
 
     def _notify_ui(self, device_id: str) -> None:
         if self.on_device_changed is not None:
