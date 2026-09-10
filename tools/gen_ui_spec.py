@@ -119,30 +119,40 @@ def render(name: str, module=theme) -> list[str]:
         return rows
     if name == "metrics":
         # No header row: this block sits INSIDE an existing table whose
-        # header and three hand-written rows live outside the markers.
+        # header and hand-written rows live outside the markers.
         return [f"| {label} | {accessor(module)} | `{source}` |"
                 for label, source, accessor in METRICS]
     raise KeyError(name)
 
 
 #: Metrics: (row label, source markup, accessor). Only rows whose value is
-#: a `theme` constant. Three rows of that table are deliberately OUTSIDE the
-#: generated block and stay hand-written:
+#: a `theme` constant. The rows below are deliberately OUTSIDE the generated
+#: block and stay hand-written:
 #:
-#:   Badge radius   "4 / 6" is correct -- two badges. The alert chip uses
-#:                  theme.BADGE_RADIUS = 4; the EMCC wordmark uses a
-#:                  hardcoded corner_radius=6 at title_bar.py:92. Same
-#:                  category as Separator: one value is a literal where a
-#:                  theme constant belongs, so half the row is underivable.
 #:   Separator      1px and its 4px margins are literals in device_card.py,
 #:                  not theme constants. Transcribing them into this file
 #:                  would move the staleness rather than remove it.
 #:   Capacity       prose.
+#:
+#: `Badge radius` was a third until 17a27ba. It was hand-written because the
+#: EMCC wordmark's `corner_radius=6` was a literal at title_bar.py:92, so half
+#: the row was underivable; that commit wired it to `theme.EMCC_RADIUS` and
+#: both values are constants now. Generating it needed no schema change -- the
+#: composite accessor is the shape `Page padding` and `Column widths` already
+#: use.
+#:
+#: DO NOT restate how many rows are hand-written, here or in UI_SPEC.md. That
+#: count stood in four places and all four went stale the moment the badge was
+#: wired -- by a change that was correct in both lanes that made it, because
+#: neither lane owned the files that explained the literal. The markers show a
+#: reader which rows are generated; the number adds nothing and rots.
 METRICS = [
     ("Title bar height",   "h-[52px]",              lambda t: t.TITLEBAR_H),
     ("Card min height",    "min-h-[142px]",         lambda t: t.CARD_MIN_H),
     ("Card radius",        "rounded-xl",            lambda t: t.CARD_RADIUS),
     ("Control radius",     "rounded-lg",            lambda t: t.CTRL_RADIUS),
+    ("Badge radius",       "rounded / rounded-md",
+     lambda t: f"{t.BADGE_RADIUS} / {t.EMCC_RADIUS}"),
     ("Page padding",       "px-8 py-4",
      lambda t: f"{t.PAGE_PAD_X} x, {t.PAGE_PAD_Y} y"),
     ("Card gap",           "gap-3",                 lambda t: t.CARD_GAP),

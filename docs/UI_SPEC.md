@@ -75,6 +75,7 @@ emerald.
 | Card min height | 142 | `min-h-[142px]` |
 | Card radius | 12 | `rounded-xl` |
 | Control radius | 8 | `rounded-lg` |
+| Badge radius | 4 / 6 | `rounded / rounded-md` |
 | Page padding | 32 x, 16 y | `px-8 py-4` |
 | Card gap | 12 | `gap-3` |
 | Card padding | 20 x | `px-5` |
@@ -82,22 +83,28 @@ emerald.
 | Column widths | 188 / 176 / 162 / flex / 148 | `w-[...]` |
 | Scroll threshold | 4 devices | `devices.length >= 4` |
 <!-- END GENERATED: metrics -->
-| Badge radius | 4 / 6 | `rounded` / `rounded-md` |
 | Separator | 1px, 4px margins | `w-px mx-1` |
 | Capacity | none | the export's "supports up to 25" was a demo limit; removed |
 
-The first ten rows are generated from `theme.py` by `tools/gen_ui_spec.py`.
-The three below the marker are hand-written because their values are not
-`theme` constants:
+The rows between the markers are generated from `theme.py` by
+`tools/gen_ui_spec.py`. The rows below them are hand-written because their
+values are not `theme` constants:
 
 * `Separator` -- the 1px width and 4px margins are literals in `device_card.py`.
 * `Capacity` -- prose.
-* `Badge radius` -- **the `4 / 6` is correct: there are two badges.** The red
-  alert chip is `theme.BADGE_RADIUS = 4` (`buttons.py`, `dashboard_view.py`);
-  the EMCC wordmark is `corner_radius=6`, hardcoded at `title_bar.py:92`.
-  Both appear in the design (`rounded` and `rounded-md`). It is un-generatable
-  for the same reason as `Separator` -- one of the two values is a literal
-  where a `theme` constant belongs, not because the row is wrong.
+
+`Badge radius` reads `4 / 6` because **there are two badges**: the red alert
+chip is `theme.BADGE_RADIUS = 4` (`buttons.py`, `dashboard_view.py`) and the
+EMCC wordmark is `theme.EMCC_RADIUS = 6` (`title_bar.py`). Both appear in the
+design, as `rounded` and `rounded-md`. It was hand-written until `17a27ba`,
+while the wordmark's radius was still a literal; both values are constants now
+and the row is generated like any other.
+
+Neither the count of generated rows nor of hand-written ones is stated here,
+deliberately. That count stood in four places and every one of them went stale
+the moment the badge was wired -- by a change correct in both lanes that made
+it, because neither lane owned the files explaining the literal. The markers
+already show which rows are which.
 
 Inner column insets are reproduced as designed: the section *labels* sit flush
 to each column's left edge while the controls below them are inset (`px-4` on
