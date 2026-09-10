@@ -23,9 +23,8 @@ take it for an oversight:
 
 The dots are static now.
 
-Hover colour changes are applied instantly rather than eased. The design's
-`duration-200` on those is a polish detail that Tk cannot express without
-animating every colour channel of every widget, and the cost/benefit is poor.
+Hover colour changes are applied instantly rather than eased: the colour
+changes in one step, with no interpolation.
 """
 
 from __future__ import annotations

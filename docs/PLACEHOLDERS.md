@@ -133,8 +133,10 @@ failed device to blue would make it indistinguishable from an idle one.
 
 ## 6. Dropped or approximated for Tk
 
-Not open questions — places where Tk cannot express the CSS. Full detail in
-[`UI_SPEC.md`](UI_SPEC.md).
+Not open questions — design features this build does not reproduce exactly.
+Some are genuine Tk limits (there is no box-shadow); others are cost or
+measured-quality decisions, and the Status column says which per row. Full
+detail in [`UI_SPEC.md`](UI_SPEC.md).
 
 | Design feature | Status |
 |---|---|
