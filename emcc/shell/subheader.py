@@ -22,6 +22,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from .. import fonts, icons, theme
+from ..widgets.view_toggle import ViewToggle
 
 #: Gap between legend entries. gap-5 in the design.
 LEGEND_GAP = 20
@@ -35,7 +36,7 @@ class SubHeader:
     which is why `App` assigns `_logo` conditionally -- see the note there.
     """
 
-    def __init__(self, parent) -> None:
+    def __init__(self, parent, *, on_view_change) -> None:
         bar = ctk.CTkFrame(parent, fg_color="transparent")
         bar.pack(fill="x")
 
@@ -98,6 +99,23 @@ class SubHeader:
             dot.pack_propagate(False)
             ctk.CTkLabel(item, text=label, font=fonts.sans(10.5),
                          text_color=theme.TEXT_GHOST).pack(side="left", padx=(6, 0))
+
+        # The view selector, built LAST and packed to the right of the row.
+        #
+        # Created last on purpose, though it turns out not to matter here:
+        # `ViewToggle` is its own class, so Tk gives it the `!viewtoggle` name
+        # series and it cannot renumber the `!ctkframe` siblings whatever the
+        # order. Verified after the change rather than assumed -- `_caption`
+        # keeps `.!ctkframe.!ctkframe.!ctkframe.!ctklabel2`.
+        #
+        # Packed after the legend so the legend keeps the exact position it
+        # had, and the toggle appears just inboard of it. This is the first
+        # change in the refactor that deliberately alters what is on screen,
+        # so the visual comparator's job changes from "nothing moved" to
+        # "only the toggle appeared".
+        self.view_toggle = ViewToggle(row, on_change=on_view_change)
+        self.view_toggle.pack(side="right", anchor="s", padx=(0, 16),
+                              pady=(0, 2))
 
         ctk.CTkFrame(bar, height=1, fg_color=theme.SUBHEADER_RULE,
                      corner_radius=0).pack(fill="x")
