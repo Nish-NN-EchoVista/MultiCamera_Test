@@ -620,6 +620,116 @@ def test_first_card_keeps_flush_top_margin_after_removal(app):
     assert new_first.pack_info()["pady"] in (0, "0", (0, 0))
 
 
+#: The two mutually exclusive wordings in `App._confirm_remove`. Spelled out
+#: here because F5 established that neither string appeared anywhere outside
+#: its own definition site -- so both branches of the only place in the shell
+#: where dialog text depends on live hardware state were unasserted.
+_REMOVE_LIVE = "This device is connected. Its connection will be closed."
+_REMOVE_FINAL = "This cannot be undone."
+
+
+def _label_texts(widget) -> list[str]:
+    """Every non-empty `CTkLabel` string under `widget`, depth-first.
+
+    Typed to `CTkLabel` rather than probing `cget("text")` on everything: most
+    widgets have no text option and would raise, and a `try/except` around the
+    probe would swallow a genuine failure to find the label at all -- which is
+    the way this helper could quietly assert nothing.
+    """
+    found = []
+    if isinstance(widget, ctk.CTkLabel):
+        text = widget.cget("text")
+        if text:
+            found.append(text)
+    for child in widget.winfo_children():
+        found.extend(_label_texts(child))
+    return found
+
+
+@pytest.mark.parametrize("state", list(ConnectionState), ids=lambda s: s.name)
+def test_the_remove_dialog_warns_exactly_when_the_connection_is_live(app, state):
+    """F5: the live branch of `_confirm_remove` was asserted by nothing.
+
+    This is the only place in the shell where dialog text changes according to
+    live hardware state -- the condition hardest to reach from a test and
+    easiest to get wrong. Neither string appeared outside `app.py`, so both
+    branches were unasserted, and the visual pass photographs only the
+    not-connected one.
+
+    Parameterised over every `ConnectionState` rather than one live and one
+    dead case, so the assertion is that the wording tracks `is_live` itself.
+    Three of the six states are live: CONNECTING, CONNECTED, RECONNECTING.
+    ERROR and STOPPING are deliberately not live -- a failed attempt has no
+    socket to close -- and a two-case test would not notice either of them
+    moving.
+
+    Dies on: swapping the two strings, or inverting the `is_live` test.
+    Both verified: 6 failed.
+
+    Does NOT die on narrowing or widening `is_live` by a state, and an earlier
+    version of this docstring claimed it did. It cannot: the test reads
+    `state.is_live` to decide what to expect, so moving a state moves the
+    expectation with it. It asserts that the wording TRACKS `is_live`, which
+    is a real property -- M1 and M2 prove it is not vacuous -- but it is
+    tautological with respect to which states are live. Measured, both passed
+    6/6. `is_live`'s membership is pinned separately below, because nothing
+    pinned it at all.
+    """
+    device = app.manager.devices[0]
+    device.connection = state
+
+    app._confirm_remove(device.id)
+    _pump(app, 4)
+    dialogs = [c for c in app.winfo_children() if isinstance(c, ctk.CTkToplevel)]
+    assert dialogs, "_confirm_remove opened no dialog"
+    try:
+        body = "\n".join(_label_texts(dialogs[-1]))
+    finally:
+        # Destroy before asserting: the dialog takes a grab 30ms after
+        # opening, and a failed assertion must not leave it held for the
+        # tests that follow.
+        dialogs[-1].destroy()
+        _pump(app, 2)
+
+    assert f"Remove {device.name}?" in body, "the dialog is not the remove dialog"
+    if state.is_live:
+        assert _REMOVE_LIVE in body, f"{state.name} is live but was not warned about"
+        assert _REMOVE_FINAL not in body, f"{state.name} got both wordings"
+    else:
+        assert _REMOVE_FINAL in body, f"{state.name} is not live but was warned about"
+        assert _REMOVE_LIVE not in body, f"{state.name} got both wordings"
+
+
+def test_is_live_names_exactly_the_states_that_hold_a_socket():
+    """`ConnectionState.is_live` is an unguarded product decision.
+
+    Three consumers -- `app.py:540` (the remove dialog's wording),
+    `device_manager.py:207` and `shell/commands.py:95` -- and until this test
+    nothing asserted WHICH states it names. The only other use of `is_live`
+    in `tests/` is a wait predicate.
+
+    Found by mutation: narrowing and widening `is_live` by one state each left
+    the whole remove-dialog test above passing 6/6, because that test derives
+    its expectation from `is_live` rather than pinning it.
+
+    The set is spelled out rather than imported, and that duplication is the
+    point: there is nothing to import it from that is not `is_live` itself,
+    which would restore the tautology. This is a decision pin -- changing
+    which states are live SHOULD require editing this line, so the change is
+    deliberate and reviewed rather than silent.
+
+    ERROR and STOPPING are excluded. That is the decision being pinned; the
+    enum records no rationale for either, so none is invented here.
+
+    Dies on: adding or removing any state from `is_live`.
+    """
+    live = {state.name for state in ConnectionState if state.is_live}
+    assert live == {"CONNECTING", "CONNECTED", "RECONNECTING"}, (
+        f"is_live names {sorted(live)}; if that change was intended, update "
+        f"this pin and the remove-dialog wording it feeds"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Add device
 # ---------------------------------------------------------------------------
