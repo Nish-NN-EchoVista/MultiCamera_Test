@@ -21,6 +21,7 @@ import customtkinter as ctk
 
 from emcc import app as app_module
 from emcc import fonts, icons, theme
+from emcc.shell.subheader import HEADING_TRACKING
 from emcc.app import App
 from emcc.backend.config_manager import ConfigManager
 from emcc.backend.events import ConnectionState
@@ -1440,6 +1441,30 @@ def test_facade_properties_raise_runtimeerror_not_attributeerror(app):
 # ---------------------------------------------------------------------------
 
 
+#: What `fonts.tracked` inserts between characters, asked of `tracked` itself
+#: rather than typed as a codepoint or read from `fonts._HAIR`. `tracked`
+#: varies the NUMBER of spacers with `em`, but stripping does not care how
+#: many there are -- only which character -- so one sample suffices at any
+#: `em`. Verified against em=0.12, 0.14 and 0.30.
+_HAIR = fonts.tracked("AB")[1]
+
+
+def _detracked(rendered: str) -> str:
+    """The heading's words, with the letter-spacing hair spaces removed.
+
+    Lets a test assert WHICH text was composed without also asserting how it
+    was styled. See F4: three assertions compared against
+    `fonts.tracked(..., 0.12)`, duplicating `subheader.HEADING_TRACKING` in
+    the test, so a change to the tracking constant -- or moving where
+    tracking is applied -- failed a ROUTING test and reported "the heading
+    still shows the previous view's text", which would have been false.
+    Measured before the change: dropping `fonts.tracked` from
+    `SubHeader.set_heading` killed both this file's chrome tests, one of them
+    accusing the wrong subsystem.
+    """
+    return rendered.replace(_HAIR, "")
+
+
 def test_the_chrome_follows_the_active_view(app):
     """Switching views must re-compose the heading and the caption.
 
@@ -1455,17 +1480,32 @@ def test_the_chrome_follows_the_active_view(app):
     CONTROLLERS", and the whole suite passed over it because nothing asserted
     this.
 
-    Dies on: dropping `self._refresh_chrome()` from `_switch_view`.
+    Dies on: dropping `self._on_shown()` from `ViewHost.show`, or passing
+    `on_shown=None` at `app.py:212`. Both verified.
+
+    The mutation this used to name -- dropping `self._refresh_chrome()` from
+    `_switch_view` -- can no longer be applied: F2 moved the refresh into
+    `ViewHost.show` so the boot path inherits it, and `_switch_view` no longer
+    calls it. The line survived the relocation and was still being read as the
+    way to check this test, which is why it is replaced rather than deleted.
+
+    This assertion is deliberately indifferent to letter-spacing; see
+    `_detracked`. Measured separation, all four mutations:
+
+        tracking constant 0.12 -> 0.14        neither test dies
+        _on_shown dropped from host.show      THIS test only
+        on_shown=None at app.py:212           THIS test only
+        fonts.tracked dropped from set_heading   the rendering test only
     """
     _pump(app, 4)
     assert app.views.active_name == "list"
-    assert app._sub.heading.cget("text") == fonts.tracked("DEVICE CONTROLLERS", 0.12)
+    assert _detracked(app._sub.heading.cget("text")) == "DEVICE CONTROLLERS"
     assert app._caption.cget("text").startswith("3 devices configured")
 
     app._switch_view("dashboard")
     _pump(app, 4)
     assert app.views.active_name == "dashboard"
-    assert app._sub.heading.cget("text") == fonts.tracked("DASHBOARD OVERVIEW", 0.12), (
+    assert _detracked(app._sub.heading.cget("text")) == "DASHBOARD OVERVIEW", (
         "the heading still shows the previous view's text"
     )
     assert not app._caption.cget("text").startswith("3 devices configured"), (
@@ -1474,7 +1514,7 @@ def test_the_chrome_follows_the_active_view(app):
 
     app._switch_view("list")
     _pump(app, 4)
-    assert app._sub.heading.cget("text") == fonts.tracked("DEVICE CONTROLLERS", 0.12)
+    assert _detracked(app._sub.heading.cget("text")) == "DEVICE CONTROLLERS"
     assert app._caption.cget("text").startswith("3 devices configured")
 
 
@@ -1491,8 +1531,8 @@ def test_the_heading_is_tracked_exactly_once(app):
     `fonts.tracked` call from `SubHeader.set_heading`.
     """
     _pump(app, 4)
-    once = fonts.tracked("DEVICE CONTROLLERS", 0.12)
-    twice = fonts.tracked(once, 0.12)
+    once = fonts.tracked("DEVICE CONTROLLERS", HEADING_TRACKING)
+    twice = fonts.tracked(once, HEADING_TRACKING)
     assert once != twice, "fonts.tracked is idempotent, so this test proves nothing"
 
     rendered = app._sub.heading.cget("text")
