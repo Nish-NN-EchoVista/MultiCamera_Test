@@ -44,6 +44,7 @@ from .. import fonts, theme
 from ..backend.device_manager import DeviceManager, DeviceState
 from ..backend.events import ConnectionState
 from .buttons import AutoButton, CleanButton
+from .canvas_util import scaling
 from .connection_view import connection_visual
 
 #: Distinct from None, which is a real value for `latest_temperature`.
@@ -180,11 +181,17 @@ class DashboardCard(ctk.CTkFrame):
         # 317 pixels wide and looks like it fits, while it actually needs 600
         # -- so the comparison has to happen in one unit or it silently never
         # truncates on exactly the machines where the text is largest.
-        try:
-            scaling = ctk.ScalingTracker.get_widget_scaling(self._name) or 1
-        except Exception:  # pragma: no cover - CTk internal
-            scaling = 1
-        width = width / scaling
+        # Deferred to `canvas_util.scaling` rather than looked up inline: this
+        # was the fourth call site for the same question and the only one that
+        # answered it differently. It caught everything and substituted 1 --
+        # the defect F9 removed from `scaling` itself -- and here a wrong 1.0
+        # compares `font.measure` against a 2.25x overstated width, so a long
+        # name silently never truncates on exactly the displays where the text
+        # is largest. The `or 1` guarded nothing reachable either:
+        # `set_widget_scaling` clamps to `max(factor, 0.4)` and the DPI term is
+        # `(x_dpi + y_dpi) / 192`, strictly positive, so the product cannot be
+        # falsy.
+        width = width / scaling(self._name)
 
         text = self._name_full
         if font.measure(text) > width:
