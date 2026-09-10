@@ -38,6 +38,8 @@ from __future__ import annotations
 
 from typing import Callable, Sequence
 
+import tkinter
+
 import customtkinter as ctk
 
 from .. import fonts, theme
@@ -509,7 +511,13 @@ class DashboardView(ctk.CTkFrame):
         self._grid.pack(fill="both", expand=True)
         try:
             self._grid._scrollbar.configure(width=8)
-        except Exception:  # pragma: no cover - CTk internal
+        except AttributeError:
+            # `_scrollbar` is CustomTkinter's private attribute. If a future
+            # version renames it the scrollbar keeps its default width, which
+            # is cosmetic -- but it must not take the view down with it.
+            # Narrowed from `except Exception`, and the `# pragma: no cover`
+            # is gone with it: the branch is provokable by deleting the
+            # attribute, so it is tested rather than annotated away.
             pass
 
         for column in range(theme.DASH_COLS):
@@ -644,10 +652,17 @@ class DashboardView(ctk.CTkFrame):
 
     def _cancel_build(self) -> None:
         if self._build_job is not None:
-            try:
-                self._ctx.after_cancel(self._build_job)
-            except Exception:  # pragma: no cover - already fired
-                pass
+            # No handler, deliberately. `after_cancel` raises nothing --
+            # measured against an already-fired job, an already-cancelled one,
+            # a bogus id, a destroyed widget and a destroyed root. tkinter's
+            # own `Misc.after_cancel` wraps its `after info` lookup in
+            # `except TclError: pass` and Tcl's `after cancel` is a no-op for
+            # an unknown id, so the handler that stood here was wrapped around
+            # a callee that had already swallowed the exception it was written
+            # to catch. Its one reachable raise is `ValueError` on a falsy id,
+            # which the `is not None` above prevents. The comment it carried,
+            # "already fired", named precisely the case that does not raise.
+            self._ctx.after_cancel(self._build_job)
             self._build_job = None
 
     def shutdown(self) -> None:
@@ -686,7 +701,11 @@ class DashboardView(ctk.CTkFrame):
         for row in range(used, used + theme.DASH_COLS + 1):
             try:
                 self._grid.grid_rowconfigure(row, minsize=0, weight=0)
-            except Exception:  # pragma: no cover - CTk internal
+            except tkinter.TclError:
+                # The grid can be destroyed between a removal and this reset;
+                # Tk then reports `bad window path name`. Narrowed from
+                # `except Exception` and tested, so the `# pragma: no cover`
+                # is gone.
                 pass
 
     # -- painting ---------------------------------------------------------

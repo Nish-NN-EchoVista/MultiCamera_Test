@@ -1089,3 +1089,68 @@ def test_heading_is_the_dashboard_subhead(tmp_path):
         assert isinstance(getattr(DashboardView, "heading", None), property)
     finally:
         root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# The two narrowed handlers
+#
+# Both were `except Exception` carrying a `# pragma: no cover`. The annotation
+# is what makes these worth testing rather than the narrowing: a pragma tells
+# the coverage instrument to stop looking, so the branch beneath it was
+# invisible to every check we run. Provoking each is what retires the
+# annotation -- a narrowed handler *reads* as checked whether or not anyone
+# checked it.
+#
+# A third, around `after_cancel` in `_cancel_build`, was deleted rather than
+# narrowed: `after_cancel` raises nothing, so no branch survives to test.
+# ---------------------------------------------------------------------------
+
+def test_an_upstream_scrollbar_rename_degrades_cosmetically(tmp_path, monkeypatch):
+    """`_scrollbar` is CustomTkinter's private attribute; losing it is cosmetic.
+
+    The view narrows its scrollbar to 8px by reaching into
+    `CTkScrollableFrame._scrollbar`. If a future CustomTkinter renames that,
+    the scrollbar keeps its default width -- a cosmetic regression, which must
+    not take the whole view down with it.
+
+    Deleting the attribute is what an upstream rename looks like from here.
+    Verified first that a `CTkScrollableFrame` still constructs, packs, takes
+    30 children and survives an update without it -- so a failure here means
+    the handler, not the fixture.
+    """
+    class NoScrollbar(ctk.CTkScrollableFrame):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            del self._scrollbar
+
+    monkeypatch.setattr(ctk, "CTkScrollableFrame", NoScrollbar)
+
+    root, _, view, _, _ = _view(tmp_path, 3)
+    try:
+        assert not hasattr(view._grid, "_scrollbar"), "fixture did not provoke it"
+        # Built and populated anyway: the miss is swallowed by design.
+        assert len(view.cards) == 3
+    finally:
+        root.destroy()
+
+
+def test_trimming_rows_after_the_grid_is_destroyed_does_not_raise(tmp_path):
+    """`_trim_rows` can run against a grid that is already gone.
+
+    The reset walks rows past the used count so `grid_propagate` stops
+    reserving their height. Once the grid is destroyed Tk raises `bad window
+    path name`, and that can happen between a removal and this pass.
+    Swallowing it is right -- there is no height left to reserve -- but the
+    catch is now `TclError` rather than everything.
+    """
+    root, _, view, _, _ = _view(tmp_path, 6)
+    try:
+        view._grid.destroy()
+
+        # Provoke it directly, so this is not merely an untaken branch.
+        with pytest.raises(tkinter.TclError):
+            view._grid.grid_rowconfigure(3, minsize=0, weight=0)
+
+        view._trim_rows(3)   # must not raise
+    finally:
+        root.destroy()
