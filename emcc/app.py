@@ -67,7 +67,13 @@ _FACADE_NAMES: frozenset[str] = frozenset({
     "_list", "_logo", "_order", "_pending_devices", "_pump",
     "_refresh_chrome", "_remove_device", "_render_device",
     "_scroll_to_end", "_shutting_down", "_toggle_auto",
-    "config_manager", "manager", "pulse", "shutdown", "title_bar"
+    "config_manager", "manager", "pulse", "shutdown", "title_bar",
+    # Added by the Dashboard mount. `views` is the host, `_sub` the
+    # sub-header builder, `_switch_view` the toggle's adapter -- all three
+    # are reached from `tests/` now, so the same obligation applies to them
+    # as to the older names: a slice that moves one must leave it reachable.
+    # The completeness test demanded these rather than my noticing.
+    "_sub", "_switch_view", "views"
 })
 
 
@@ -266,8 +272,20 @@ class App(ctk.CTk):
         host needs both, because a view being shown for the first time -- or
         one that went dirty while hidden -- is sent `set_devices` as part of
         `show`. This is the only place those two shapes meet.
+
+        **The chrome refresh is not optional.** The shell owns the heading,
+        the caption and the counts, and each of those is composed from the
+        *active view* -- so changing which view is active changes all three.
+        The host does not call back into the shell, and only `ListView`
+        reports movement via `on_changed`, so without this the sub-header
+        keeps the previous view's heading and caption after a switch. That is
+        exactly what shipped in the mount commit: the caption stayed
+        "3 devices configured - click Connect..." on the Dashboard, and 290
+        tests passed over it because nothing asserted the chrome follows the
+        view. See `test_the_chrome_follows_the_active_view`.
         """
         self.views.show(name, self.manager.devices)
+        self._refresh_chrome()
 
     # ------------------------------------------------------------------
     # Facade properties over the list view
@@ -350,19 +368,37 @@ class App(ctk.CTk):
         it (`call`, `eval`, `createcommand`); narrowing that would break the
         toolkit rather than the facade.
 
-        Safe to blame the modularisation here **only because facade properties
-        raise `RuntimeError`, never `AttributeError`** -- see
-        `VIEW_CONTRACT.md:151`. An `AttributeError` from inside a property
+        Facade *properties* raise `RuntimeError`, never `AttributeError` --
+        see `VIEW_CONTRACT.md:151`. An `AttributeError` from inside a property
         would be swallowed by Python's attribute machinery and routed here,
-        where this message would blame a missing attribute for what is really
-        an unwired collaborator. With that rule held, an interception is
-        genuinely a missing name.
+        where it would be reported as a missing attribute rather than as the
+        unwired collaborator it really is. That rule is what keeps this
+        interception meaning "the name is absent" rather than "something
+        inside the getter went wrong".
+
+        **The message names two causes rather than asserting one.** An earlier
+        version said the name was *"most likely lost during the
+        modularisation"*, which is a diagnosis where the evidence only
+        supports an observation. Absence has a second cause: 22 of the 27
+        facade names are plain attributes and **nine are assigned during
+        construction** -- `pulse` at :102 through `views` at :213 -- so any of
+        them read before its own assignment line lands here too. Blaming the
+        modularisation for that sends the reader looking for a deleted
+        attribute when the fault is ordering.
+
+        Ordering first, because it is the likelier of the two: a lost facade
+        name fails loudly in the completeness test, whereas an ordering bug
+        only shows on the path that reads early.
         """
         if name in _FACADE_NAMES:
             raise AttributeError(
                 f"'App' has no attribute {name!r}. It is a facade attribute "
-                f"reached from tests/ or tools/, so it was most likely lost "
-                f"during the modularisation -- see _FACADE in app.py."
+                f"(see _FACADE_NAMES in app.py), so either it was lost during "
+                f"the modularisation, or it is assigned during construction "
+                f"and something read it before that line. Check the "
+                f"construction order in App.__init__ first -- nine facade "
+                f"attributes are assigned there, and an ordering bug is the "
+                f"likelier of the two."
             )
         return super().__getattr__(name)
 
@@ -396,6 +432,7 @@ class App(ctk.CTk):
         view = self.views.active
         if view is not None:
             view.on_device_count_changed(total)
+            self._sub.set_heading(view.heading)
             self._sub.set_caption(view.caption(total))
 
         self.title_bar.update_from(self.manager)

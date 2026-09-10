@@ -63,6 +63,27 @@ class DeviceView(Protocol):
     def padding(self) -> dict:
         """`padx`/`pady` the host applies when packing `widget`."""
 
+    @property
+    def heading(self) -> str:
+        """The sub-header heading for this view. **Raw text, not tracked.**
+
+        Letter-spacing is applied at the render site --
+        `shell/subheader.py` wraps this in `fonts.tracked(..., 0.12)` -- so
+        return the plain words. A view that pre-tracked its own heading would
+        be tracked twice and render with doubled hair spaces.
+
+        Same division as `caption`: the view owns the words, the shell owns
+        how they look.
+
+        **A property, not an annotated class attribute**, and the difference
+        is enforcement rather than style. `name` is declared as an annotation
+        (`name: str`), and annotations live in `__annotations__` rather than
+        in `vars()`, so the conformance test that derives its expectations
+        from this class cannot see them -- it checks methods by signature and
+        properties by presence, and an annotated attribute gets neither. So
+        `name` is currently unenforced; a property is checked.
+        """
+
     def caption(self, total: int) -> str:
         """The sub-header caption line for this view at `total` devices.
 

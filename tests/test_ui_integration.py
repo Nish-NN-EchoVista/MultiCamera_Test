@@ -19,7 +19,7 @@ import pytest
 
 import customtkinter as ctk
 
-from emcc import icons, theme
+from emcc import fonts, icons, theme
 from emcc.app import App
 from emcc.backend.config_manager import ConfigManager
 from emcc.backend.events import ConnectionState
@@ -1439,3 +1439,71 @@ def test_facade_properties_raise_runtimeerror_not_attributeerror(app):
         probe = type(app).__new__(type(app))      # no __init__, no collaborators
         with pytest.raises(RuntimeError):
             descriptor.fget(probe)
+
+
+# ---------------------------------------------------------------------------
+# The view host and the toggle
+# ---------------------------------------------------------------------------
+
+
+def test_the_chrome_follows_the_active_view(app):
+    """Switching views must re-compose the heading and the caption.
+
+    This is the test the mount commit lacked. The shell owns the heading,
+    caption and counts, and composes each from the **active view** -- so
+    changing which view is active changes all three. But the host does not
+    call back into the shell, and only `ListView` reports movement through
+    `on_changed`, so `_switch_view` has to refresh the chrome itself.
+
+    Without that call the sub-header keeps the *previous* view's text. That
+    shipped: on the Dashboard the caption read "3 devices configured - click
+    Connect to establish TCP connection" and the heading read "DEVICE
+    CONTROLLERS", and the whole suite passed over it because nothing asserted
+    this.
+
+    Dies on: dropping `self._refresh_chrome()` from `_switch_view`.
+    """
+    _pump(app, 4)
+    assert app.views.active_name == "list"
+    assert app._sub.heading.cget("text") == fonts.tracked("DEVICE CONTROLLERS", 0.12)
+    assert app._caption.cget("text").startswith("3 devices configured")
+
+    app._switch_view("dashboard")
+    _pump(app, 4)
+    assert app.views.active_name == "dashboard"
+    assert app._sub.heading.cget("text") == fonts.tracked("DASHBOARD OVERVIEW", 0.12), (
+        "the heading still shows the previous view's text"
+    )
+    assert not app._caption.cget("text").startswith("3 devices configured"), (
+        "the caption still shows the list view's wording"
+    )
+
+    app._switch_view("list")
+    _pump(app, 4)
+    assert app._sub.heading.cget("text") == fonts.tracked("DEVICE CONTROLLERS", 0.12)
+    assert app._caption.cget("text").startswith("3 devices configured")
+
+
+def test_the_heading_is_tracked_exactly_once(app):
+    """The view returns raw words; the shell applies the letter-spacing.
+
+    A view that pre-tracked its own heading would be tracked twice here and
+    render with doubled hair spaces -- visible, and nothing else would catch
+    it. Asserted against what `fonts.tracked` actually inserts rather than
+    against a typed codepoint, because `tracked` uses `max(1, ...)` spacers
+    and a literal is easy to get wrong.
+
+    Dies on: tracking in the view instead of the shell, or dropping the
+    `fonts.tracked` call from `SubHeader.set_heading`.
+    """
+    _pump(app, 4)
+    once = fonts.tracked("DEVICE CONTROLLERS", 0.12)
+    twice = fonts.tracked(once, 0.12)
+    assert once != twice, "fonts.tracked is idempotent, so this test proves nothing"
+
+    rendered = app._sub.heading.cget("text")
+    assert rendered == once
+    assert rendered != twice
+    assert app.views.active.heading == "DEVICE CONTROLLERS", (
+        "the view must return raw words, not a tracked string"
+    )

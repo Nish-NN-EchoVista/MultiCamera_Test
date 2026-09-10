@@ -27,6 +27,9 @@ from ..widgets.view_toggle import ViewToggle
 #: Gap between legend entries. gap-5 in the design.
 LEGEND_GAP = 20
 
+#: Letter-spacing for the banner heading, in em. `tracking-[0.12em]`.
+HEADING_TRACKING = 0.12
+
 
 class SubHeader:
     """px-8 pt-4 pb-2.5 flex items-end justify-between border-b
@@ -46,13 +49,17 @@ class SubHeader:
         left = ctk.CTkFrame(row, fg_color="transparent")
         left.pack(side="left", anchor="s")
 
-        ctk.CTkLabel(
+        # Kept as an attribute so `set_heading` can retarget it. The text
+        # starts empty and the shell fills it from the active view on the
+        # first chrome refresh, which happens during construction.
+        self.heading = ctk.CTkLabel(
             left,
-            text=fonts.tracked("DEVICE CONTROLLERS", 0.12),
+            text="",
             font=fonts.sans(11, 600),
             text_color=theme.TEXT_SUBHEAD,
             anchor="w",
-        ).pack(fill="x")
+        )
+        self.heading.pack(fill="x")
 
         self.caption = ctk.CTkLabel(
             left, text="", font=fonts.sans(11), text_color=theme.TEXT_WHISPER,
@@ -119,6 +126,16 @@ class SubHeader:
 
         ctk.CTkFrame(bar, height=1, fg_color=theme.SUBHEADER_RULE,
                      corner_radius=0).pack(fill="x")
+
+    def set_heading(self, text: str) -> None:
+        """Set the banner heading, applying the design's letter-spacing.
+
+        The **tracking is applied here, not by the view.** `fonts.tracked`
+        inserts hair spaces, so a view that returned a pre-tracked string
+        would be tracked twice and render with doubled gaps. Views return raw
+        words; this is the render site.
+        """
+        self.heading.configure(text=fonts.tracked(text, HEADING_TRACKING))
 
     def set_caption(self, text: str) -> None:
         """Set the device-count line.

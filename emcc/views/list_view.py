@@ -137,6 +137,20 @@ class ListView:
     def padding(self) -> dict:
         return {"padx": theme.PAGE_PAD_X - 8, "pady": theme.PAGE_PAD_Y}
 
+    @property
+    def heading(self) -> str:
+        """Raw words; `SubHeader` applies the letter-spacing.
+
+        The string itself lives in `theme.py` beside `DASH_SUBHEAD`, which is
+        where this codebase keeps user-visible wording -- seven such constants
+        are there already. Discoverability decided it rather than taxonomy:
+        grepping the string works either way, and so does reading the contract
+        and visiting each view, but *looking in `theme.py` for UI wording*
+        only works if the string is in it. More paths reach it there, and
+        there is no asymmetry left to explain.
+        """
+        return theme.LIST_SUBHEAD
+
     def caption(self, total: int) -> str:
         return (f"{total} device{'' if total == 1 else 's'} configured · "
                 "click Connect to establish TCP connection")
