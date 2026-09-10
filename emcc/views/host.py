@@ -204,14 +204,31 @@ class ViewHost:
             self._call(name, "remove_device", device_id)
             self._call(name, "on_device_count_changed", total)
 
-    def note_device_set_changed(self) -> None:
-        """A device was added or removed: every inactive view is now behind.
+    def note_device_set_changed(self, mutated: str | None = None) -> None:
+        """A device was added or removed: every view except `mutated` is behind.
 
-        The active view is updated in place by whoever made the change, so it
+        `mutated` is the view the caller updated in place, which therefore
         stays clean. Every other view is marked dirty and gets the whole
         truth via `set_devices` when next shown -- never a partial update
         applied to a stale set, which is the rule recorded in
         `decisions.json`.
+
+        **`mutated`, not the ACTIVE view.** This excluded `self._active_name`
+        until it was measured, on the assumption that the view on screen is
+        the one the caller changed. That is false: `App._view()` is hardwired
+        to the list view regardless of what is displayed, so with the
+        Dashboard up, `_add_device` appended to the hidden List and this
+        method then dirtied the List -- which was already current -- and left
+        the Dashboard, which was stale, clean. Measured: manager 4 devices,
+        list view 4 cards, Dashboard 3, `_dirty == {"list"}`, and the
+        Dashboard still 3 after a full round trip. Permanently stale, plus a
+        needless full rebuild of the List on the way back.
+
+        Latent rather than live today, because the Dashboard has no add or
+        remove control so neither mutator is reachable while it is active.
+        `_add_device` is in `_FACADE_NAMES` though, so it is reachable by
+        design from outside the GUI, and adding a Dashboard add-control would
+        make it live and silently wrong.
 
         This exists because the host's own `add_device`/`remove_device`
         routing has **no callers**: the shell mutates the list view directly
@@ -220,7 +237,7 @@ class ViewHost:
         dirty-on-hide would leave a hidden Dashboard rendering a stale grid.
         """
         for name in self._views:
-            if name != self._active_name:
+            if name != mutated:
                 self._dirty.add(name)
 
     def set_devices(self, devices: Sequence[DeviceState]) -> None:

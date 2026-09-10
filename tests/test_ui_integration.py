@@ -1640,6 +1640,47 @@ def test_an_idle_switch_does_not_reseed(app):
     assert seen == [], f"reseeded {seen} across three idle switches"
 
 
+def test_the_stale_view_is_the_one_reseeded_not_the_active_one(app):
+    """The view that changed is not necessarily the view on screen.
+
+    `_add_device` appends through `App._view()`, which is hardwired to the
+    list view whatever is displayed. `note_device_set_changed` excluded the
+    ACTIVE view, so with the Dashboard up it left the Dashboard -- the stale
+    one -- clean, and dirtied the List, which had just been updated in place.
+
+    Measured before the fix: manager 4 devices, list view 4 cards, Dashboard
+    3, `_dirty == {"list"}`, and the Dashboard still at 3 after a round trip.
+    Two faults from one wrong premise -- the Dashboard permanently stale, and
+    a full `ListView` rebuild on the way back for a view that needed nothing.
+
+    Dies on: excluding `self._active_name` instead of the named `mutated`
+    view -- which is what it did until this test was written.
+    """
+    app._switch_view("dashboard")
+    _pump(app, 12)
+    dashboard = app.views._views["dashboard"]
+
+    seen, restore = _reseeds(app)
+    try:
+        app._add_device()
+        _pump(app, 12)
+        app._switch_view("list")
+        _pump(app, 12)
+        app._switch_view("dashboard")
+        _pump(app, 12)
+    finally:
+        restore()
+
+    assert len(dashboard._devices) == len(app.manager.devices), (
+        f"Dashboard holds {len(dashboard._devices)} of "
+        f"{len(app.manager.devices)} devices: it was active when the device "
+        f"was added, so it was the stale view -- and it was left clean"
+    )
+    assert "list" not in seen, (
+        "the list view was rebuilt despite having been updated in place"
+    )
+
+
 def test_a_device_added_while_hidden_still_reseeds(app):
     """The other half: a view that missed a change must be reseeded.
 
@@ -1682,14 +1723,22 @@ def test_a_device_added_while_hidden_still_reseeds(app):
     assert len(dashboard._devices) == before + 1
 
 
-def test_the_active_view_is_not_dirtied_by_its_own_change(app):
-    """The view that made the change is already correct.
+def test_the_mutated_view_is_not_dirtied_by_its_own_change(app):
+    """The view that received the change is already correct.
 
     Dirtying it too would reinstate the rebuild this fix removes -- the next
     switch away and back would reseed even though nothing was missed.
 
-    Dies on: `note_device_set_changed` dirtying every view rather than the
-    inactive ones.
+    Renamed from `test_the_active_view_is_not_dirtied_by_its_own_change`. The
+    old name asserted the premise that turned out to be false: the mutated
+    view and the active view are not the same thing, because `App._view()` is
+    hardwired to the list view. Here they coincide -- the list IS active --
+    which is why this passed while the Dashboard case was broken. See
+    `test_the_stale_view_is_the_one_reseeded_not_the_active_one` for the case
+    that separates them.
+
+    Dies on: `note_device_set_changed` dirtying every view rather than
+    excluding the one named by `mutated`.
     """
     _pump(app, 4)
     assert app.views.active_name == "list"
@@ -1698,5 +1747,5 @@ def test_the_active_view_is_not_dirtied_by_its_own_change(app):
     _pump(app, 4)
 
     assert "list" not in app.views._dirty, (
-        "the active view was dirtied by a change it applied itself"
+        "the mutated view was dirtied by a change it received itself"
     )
