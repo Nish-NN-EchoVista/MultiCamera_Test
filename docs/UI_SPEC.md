@@ -8,6 +8,7 @@ Companion page: [`PLACEHOLDERS.md`](PLACEHOLDERS.md) — stubs and open question
 
 ## Surfaces
 
+<!-- BEGIN GENERATED: surfaces -->
 | Role | Token | Hex | Source |
 |---|---|---|---|
 | Page | `APP_BG` | `#12141b` | `bg-[#12141b]` |
@@ -15,6 +16,7 @@ Companion page: [`PLACEHOLDERS.md`](PLACEHOLDERS.md) — stubs and open question
 | Device card | `CARD` | `#181c25` | `bg-[#181c25]` |
 | Inputs / temp button | `INPUT_BG` | `#111419` | `bg-[#111419]` |
 | Auto button (off) | `AUTO_OFF_BG` | `#1c1f29` | `bg-[#1c1f29]` |
+<!-- END GENERATED: surfaces -->
 
 ## Flattened translucency
 
@@ -23,6 +25,7 @@ against the surface it sits on. These are **computed at import time** by
 `theme.over()` rather than hard-coded, so each one still names its Tailwind
 origin — see `emcc/theme.py`.
 
+<!-- BEGIN GENERATED: blends -->
 | Role | Tailwind source | Flattened |
 |---|---|---|
 | Clean off fill | `bg-blue-700/15 on card` | `#142e41` |
@@ -55,6 +58,7 @@ origin — see `emcc/theme.py`.
 | Add hover text | `text-blue-500/70` | `#1a86bd` |
 | Add circle hover | `border-blue-600/40` | `#0a5279` |
 | Input focus border | `focus:border-blue-500/50` | `#18648c` |
+<!-- END GENERATED: blends -->
 
 Base ramps: `red` is Tailwind's 300–700 (sRGB equivalents of the v4 OKLCH
 ramps). `blue` and `emerald` are **Echovista brand ramps**, derived from
