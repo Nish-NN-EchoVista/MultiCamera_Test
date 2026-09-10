@@ -1486,13 +1486,13 @@ def test_scrollbar_appears_only_at_the_threshold(app):
     than what its assertion can see -- see
     `test_scrollbar_is_not_regridded_on_every_refresh`, which does catch it.
 
-    **This test now carries two declared mutations, not one.** It is also the
-    only test that catches `_scrollbar_visible` initialised `False` -- the
-    boundary test booting at the threshold cannot see that one, because the
-    early return leaves the bar correctly gridded there. So a failure here is
-    two signals, and a future "fix" to this test that weakens either
-    assertion drops both mutations at once. Correlated coverage, deliberately
-    recorded: do not read one red test as one escaped mutation.
+    **It carried a second declared mutation and no longer does.** It used to
+    be the only test catching `_scrollbar_visible` initialised `False`. That
+    flag is gone -- `_set_scrollbar_visible` now derives from
+    `bool(grid_info())` -- so the mutation has no expression to make, and a
+    `Dies on:` naming it would name something unwritable. Recorded rather than
+    silently dropped: the correlated-coverage warning that stood here was
+    true of the flag, and removing the flag is what retired it.
     """
     bar = getattr(app._list, "_scrollbar", None)
     assert bar is not None, "CTkScrollableFrame has no _scrollbar to assert on"
@@ -1527,9 +1527,15 @@ def test_scrollbar_is_not_regridded_on_every_refresh(app, monkeypatch):
     the sibling visibility test does not catch this mutation despite once
     claiming to.
 
-    Dies on: removing `if visible == self._scrollbar_visible: return`,
-    which moved to `ListView._set_scrollbar_visible` in slice 4 along with the
-    cached flag. Still driven through `app._refresh_chrome()`.
+    Dies on: removing `if visible == bool(bar.grid_info()): return` from
+    `ListView._set_scrollbar_visible`. Still driven through
+    `app._refresh_chrome()`.
+
+    That guard used to compare against a cached `_scrollbar_visible`, and this
+    line named the cached form until the flag was replaced by the derivation.
+    The mutation is the same one -- delete the early return -- but a
+    `Dies on:` that names a comparison no longer in the file sends the next
+    reader looking for it.
     """
     while len(app.manager.devices) < theme.SCROLL_THRESHOLD:
         app._add_device()

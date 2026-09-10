@@ -115,11 +115,14 @@ class ListView:
             self._frame, text="", font=fonts.sans(10.5),
             text_color=theme.TEXT_SCROLL_HINT, height=14,
         )
-        #: Cached because the guards in `on_device_count_changed` are the whole
-        #: point of them. `_scrollbar_visible` starts True because
-        #: CTkScrollableFrame grids its scrollbar at construction.
+        #: Cached because the guard in `on_device_count_changed` is the whole
+        #: point of it, and because the hint has no derivable alternative:
+        #: after `pack_forget()` Tk's `pack_info()` **raises TclError** rather
+        #: than returning empty, so there is nothing to observe. The scrollbar
+        #: used to be cached alongside it and no longer is -- `grid_info()`
+        #: returns `{}` after `grid_remove()`, so that one can be observed.
+        #: Measured both.
         self._hint_shown = False
-        self._scrollbar_visible = True
 
         self._devices: list[DeviceState] = (
             list(devices) if devices is not None else list(manager.devices)
@@ -150,7 +153,7 @@ class ListView:
         return theme.LIST_SUBHEAD
 
     def caption(self, total: int) -> str:
-        return (f"{total} device{'' if total == 1 else 's'} configured Â· "
+        return (f"{total} device{'' if total == 1 else 's'} configured Ã‚Â· "
                 "click Connect to establish TCP connection")
 
     def show(self) -> None:
@@ -352,26 +355,47 @@ class ListView:
     def _set_scrollbar_visible(self, visible: bool) -> None:
         """The design only shows the scrollbar at >= 4 devices.
 
-        Keeps its cached flag rather than deriving from `bool(grid_info())`.
-        That derive-not-cache change is queued as its own slice after the
-        refactor, because it is a behaviour change and this slice is a move.
+        Derived from `bool(bar.grid_info())` rather than from a cached flag:
+        the widget is asked what it is, instead of this view remembering what
+        it last did. Same move as `ViewHost.show` asking each view for its
+        `device_fingerprint`, and it is available here only because Tk allows
+        it -- `grid_info()` returns `{}` after `grid_remove()`, where
+        `pack_info()` raises after `pack_forget()`. The hint therefore keeps
+        its cache and this does not.
 
-        Note the asymmetry, which Tk forces rather than us choosing: after
-        `grid_remove()` `grid_info()` returns `{}`, so a derived predicate is
-        available for the scrollbar -- while after `pack_forget()`
-        `pack_info()` **raises TclError**, so no derived predicate exists for
-        the hint at all. Measured both.
+        **THE CACHE WAS NOT WRONG, and the two holes this was queued to fix
+        are both latent rather than live.** Measured before changing it:
+
+        * the scrollbar *is* gridded at construction, so `= True` matched
+          reality -- there was no boot hole;
+        * `CTkScrollableFrame.configure()` re-grids it via `_create_grid()`,
+          but only for `corner_radius`, `border_width` or `label_text`, and
+          `emcc/` never calls `configure()` on that frame at all. So the
+          inverse hole needs a call nobody makes.
+
+        What the derivation buys is therefore not a bug fix. The flag's
+        correctness rested on a CustomTkinter implementation detail *and* on
+        an absence -- neither enforced, and the absence is one `configure()`
+        away from ending. An observation cannot diverge from what it
+        observes.
+
+        Cost, because this is the reason the same move was *rejected* for
+        `DeviceCard._paint`: `grid_info()` measures **7.4 us** against
+        `cget()`'s 0.3, so it is the more expensive call by 25x. It survives
+        here on frequency -- once per `_refresh_chrome`, which is once per
+        pump tick that had changes, so ~74 us/s at the 100 ms interval.
+        `_paint` faced 250 reads per render. Cheap-per-call versus
+        few-per-second, and only the second is affordable.
         """
-        if visible == self._scrollbar_visible:
-            return
         bar = getattr(self._frame, "_scrollbar", None)
         if bar is None:
+            return
+        if visible == bool(bar.grid_info()):
             return
         if visible:
             bar.grid()
         else:
             bar.grid_remove()
-        self._scrollbar_visible = visible
 
     # -- lifecycle -------------------------------------------------------
 
