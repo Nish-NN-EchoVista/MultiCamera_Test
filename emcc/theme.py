@@ -32,17 +32,6 @@ def over(fg: str, bg: str, alpha: float) -> str:
     return _to_hex(tuple(round(f[i] * alpha + b[i] * (1 - alpha)) for i in range(3)))
 
 
-def mix(a: str, b: str, t: float) -> str:
-    """Linear blend; t=0 -> a, t=1 -> b.
-
-    NOTE: no callers. Its one documented consumer was the status pulse,
-    removed 2026-09-10. Kept rather than deleted because removing a
-    public helper is a wider call than this change; flagged for the
-    dead-code pass.
-    """
-    return over(b, a, t)
-
-
 # --------------------------------------------------------------------------
 # Tailwind source palette (sRGB hex equivalents of the v4 OKLCH ramps)
 # --------------------------------------------------------------------------
@@ -73,7 +62,9 @@ def mix(a: str, b: str, t: float) -> str:
 BLUE_300, BLUE_400, BLUE_500 = "#7dd4ff", "#47c2ff", "#1eb5ff"
 BLUE_600, BLUE_700 = "#00a9fc", "#0097e1"
 
-#: The sampled logotype colour, kept named for traceability. Equal to BLUE_600.
+#: The sampled logotype colour, kept named for traceability. Equal to
+#: BLUE_600. **Deliberately has no readers** -- it exists so the anchor is
+#: greppable, so a dead-name survey should keep it rather than report it.
 BRAND_BLUE = BLUE_600
 
 # --- Green: the Echovista green, NOT Tailwind emerald -------------------
@@ -123,6 +114,7 @@ EMERALD_300, EMERALD_400, EMERALD_500 = "#83f388", "#3cec43", "#15d51d"
 EMERALD_600, EMERALD_700 = "#11ab17", "#0e8f13"
 
 #: The brand green, kept named for traceability. Equal to EMERALD_600.
+#: **Deliberately has no readers**, as with BRAND_BLUE above.
 BRAND_GREEN = EMERALD_600
 
 RED_300, RED_400, RED_500 = "#fca5a5", "#f87171", "#ef4444"
@@ -245,11 +237,11 @@ TOGGLE_KNOB = WHITE
 # Temperature
 # --------------------------------------------------------------------------
 
-# The warning threshold is runtime configuration, not a design token -- it
-# lives in `config.json` as `temperature_warning_c` (default 65) and is read
-# from `Settings`. This constant is only the fallback for a widget constructed
-# before settings are available.
-TEMP_ALERT_FALLBACK = 65.0
+# The warning threshold is runtime configuration, not a design token, so it
+# has no constant here: it lives in `config.json` as `temperature_warning_c`
+# and is read from `Settings` by the backend (`connection_worker.py`,
+# `device_manager.py`). No widget reads a threshold at all -- the alert
+# reaches the UI as an already-computed flag.
 
 #: Shown until the first temperature sample arrives. The design always shows a
 #: number, so this keeps the button's metrics while reading as "no data".
@@ -316,7 +308,8 @@ ADD_CIRCLE_HOVER = over(BLUE_600, ADD_BG_HOVER, 0.40)
 # --------------------------------------------------------------------------
 
 FOCUS_BORDER = over(BLUE_500, INPUT_BG, 0.50)   # focus:border-blue-500/50
-FOCUS_RING = over(BLUE_500, CARD, 0.20)         # focus:ring-blue-500/20
+# No token for `focus:ring-blue-500/20`: that design feature was dropped --
+# see "Known approximations" in docs/UI_SPEC.md.
 
 # --------------------------------------------------------------------------
 # Scrollbar (.device-scroll in index.css)
@@ -459,7 +452,6 @@ DASH_TEMP_ALERT = "alert"
 
 SEG_BG = INPUT_BG
 SEG_BORDER = BORDER_INPUT
-SEG_BORDER_HOVER = BORDER_INPUT_HOVER
 SEG_RADIUS = 8
 
 # The selected segment carries the accent; the other is quiet, so the control

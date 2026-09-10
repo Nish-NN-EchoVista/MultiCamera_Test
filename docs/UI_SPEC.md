@@ -192,7 +192,7 @@ bar moves the window and double-clicking it toggles maximise.
 | Design feature | Status |
 |---|---|
 | `shadow-[0_2px_16px_rgba(0,0,0,0.35)]` on cards | dropped — no box-shadow in Tk; contributes little on a near-black ground |
-| `focus:ring-blue-500/20` on inputs | dropped; the `focus:border-blue-500/50` change is kept |
+| `focus:ring-blue-500/20` on inputs | dropped; the `focus:border-blue-500/50` change is kept. The `FOCUS_RING` token was removed too (2026-09-10), so no constant remains for it |
 | `tracking-[0.14em]` / `[0.12em]` micro-labels | approximated by inserting hair spaces (`fonts.tracked`) — Tk fonts have no letter-spacing |
 | Scrollbar 5px | 8px; `CTkScrollbar` stops rendering a usable thumb below that |
 | Knob `shadow` on the Auto toggle | dropped — invisible at 12px on a white knob |
