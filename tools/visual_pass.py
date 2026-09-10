@@ -189,10 +189,19 @@ def run():
     # APP's own fuse, `clean_timeout_s`, default 10s:
     # `device_manager._restart_clean_timer` schedules `_on_clean_timeout`,
     # which clears `clean_active` and repaints. State 04 starts the clean, so
-    # 05, both 06 crops and 03b rendered `ON_*` or `CLEAN_OFF_*` depending on
-    # where the pass crossed 10s of wall clock. Bistable, 12,884 px in a
-    # 182x72 box, and it MOVED BETWEEN STATES as the pass got faster -- which
-    # is why it read as a different finding each time it was measured.
+    # 04, 05 and 03b rendered `ON_*` or `CLEAN_OFF_*` depending on where the
+    # pass crossed 10s of wall clock. Bistable, 12,884 px in a 182x72 box, and
+    # it MOVED BETWEEN STATES as the pass got faster -- which is why it read
+    # as a different finding each time it was measured.
+    #
+    # EXACTLY those three states, measured by forcing the fuse and diffing
+    # against a pass that never fires it -- not reasoned from which states
+    # "look like" they show the control. An earlier version of this comment
+    # said "05, both 06 crops and 03b", which was wrong twice: the 06 crops
+    # capture `_sections[0].body`, the Device Name column, which excludes the
+    # Clean control entirely; and 04 is affected, being the state that starts
+    # the clean. 01-03 precede it, 07-08 are dialogs, and 09-10 no longer
+    # depict it in either arm.
     #
     # The comment this replaces asserted a state "cannot expire before the
     # shutter". It was the app's own timer that expired them.
@@ -316,9 +325,9 @@ if any(name == "clean_still_active" and value is False for name, value in result
     print()
     print("  INVALID PASS -- the app's Clean fuse fired before the shutter.")
     print(f"    clean_timeout_s was {CLEAN_TIMEOUT_S}s and state 04 starts the")
-    print("    clean. 05, both 06 crops and 03b render Clean-OFF and will")
-    print("    differ from any baseline captured with it held, by ~12,884px in")
-    print("    a 182x72 box. Raise EMCC_VISUAL_CLEAN_TIMEOUT and re-run.")
+    print("    clean. 04, 05 and 03b render Clean-OFF and will differ from any")
+    print("    baseline captured with it held, by ~12,884px in a 182x72 box.")
+    print("    Raise EMCC_VISUAL_CLEAN_TIMEOUT and re-run.")
     sys.exit(1)
 
 if failures:
