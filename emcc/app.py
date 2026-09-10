@@ -42,6 +42,7 @@ from .views.base import StandaloneCtx
 from .views.host import ViewHost
 from .views.list_view import CARD_BUILD_INTERVAL_MS, INITIAL_CARDS, ListView
 from .widgets.add_device import AddDeviceButton
+from .widgets.dashboard_view import DashboardView
 from .widgets.device_card import DeviceCard
 from .widgets.dialogs import ConfirmDialog, ErrorReporter
 from .widgets.title_bar import TitleBar
@@ -205,6 +206,7 @@ class App(ctk.CTk):
         """
         self.views = ViewHost(self, StandaloneCtx(self))
         self.views.register("list", self._make_list_view)
+        self.views.register("dashboard", self._make_dashboard_view)
         self.views.show("list", self.manager.devices)
 
     def _make_list_view(self, parent, ctx) -> ListView:
@@ -234,6 +236,38 @@ class App(ctk.CTk):
             is_shutting_down=lambda: self._shutting_down,
         )
         return self._list_view
+
+    def _make_dashboard_view(self, parent, ctx) -> DashboardView:
+        """Build the dashboard view, wiring its collaborators before use.
+
+        Mirrors `_make_list_view`, including the wiring-order-first rule: the
+        host calls `set_devices` and `show` on the object this returns, so
+        anything those touch has to be in place before the return, not after.
+
+        The Dashboard takes only `on_clean` and `on_auto` -- its cards carry
+        no connect, temperature or remove controls -- so the smaller callback
+        set is the view's own shape rather than an omission here.
+
+        No `_dashboard_view` attribute is kept. Nothing in `_FACADE_NAMES`
+        resolves through it, and the host already owns the reference; a second
+        one on `App` would be a second thing to keep in step.
+        """
+        return DashboardView(
+            parent, ctx,
+            devices=self.manager.devices,
+            on_clean=self._clean_device,
+            on_auto=self._toggle_auto,
+        )
+
+    def _switch_view(self, name: str) -> None:
+        """Adapt `ViewToggle.on_change(name)` to `ViewHost.show(name, devices)`.
+
+        The toggle knows which view was chosen and nothing about devices; the
+        host needs both, because a view being shown for the first time -- or
+        one that went dirty while hidden -- is sent `set_devices` as part of
+        `show`. This is the only place those two shapes meet.
+        """
+        self.views.show(name, self.manager.devices)
 
     # ------------------------------------------------------------------
     # Facade properties over the list view
