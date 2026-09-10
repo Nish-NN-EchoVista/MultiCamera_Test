@@ -84,11 +84,22 @@ def _pump(root, times: int = 4) -> None:
         root.update()
 
 
-def _view(tmp_path, count: int, *, complete: bool = True):
+def _view(tmp_path, count: int, *, complete: bool = True,
+          mapped: bool = True):
     """A packed DashboardView with `count` devices.
 
     `complete=True` finishes the progressive build so geometry can be
     measured; pass False to inspect the streaming behaviour itself.
+
+    `mapped=False` skips the window-mapping pump, for tests asserting only
+    logical state -- card count, grid row, slots, callbacks. Measured at 26
+    cards, medians of 7 interleaved runs: 5048ms mapped against 1292ms not,
+    assertions identical.
+
+    **True by default deliberately.** An unmapped root reports 200x200 and its
+    view 56px wide, so a test needing geometry that forgot to ask would measure
+    nonsense -- and some such assertions pass against nonsense rather than
+    failing. The direction that can be silently wrong is the one to opt into.
     """
     root = _root()
     config = _config(tmp_path, count)
@@ -103,7 +114,8 @@ def _view(tmp_path, count: int, *, complete: bool = True):
         # build_now cancels the pending timer, so the window can be mapped
         # afterwards without the streaming build racing the geometry pass.
         view.build_now()
-        _pump(root, 2)
+        if mapped:
+            _pump(root, 2)
     else:
         root.update_idletasks()
     return root, manager, view, cleaned, autoed
@@ -114,7 +126,7 @@ def _view(tmp_path, count: int, *, complete: bool = True):
 # ---------------------------------------------------------------------------
 
 def test_grid_wraps_every_five_devices(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 12)
+    root, manager, view, _, _ = _view(tmp_path, 12, mapped=False)
     try:
         expected = [(i // 5, i % 5) for i in range(12)]
         actual = [
@@ -176,7 +188,7 @@ def test_twenty_five_cards_fit_the_default_window(tmp_path):
 
 def test_grid_scrolls_rather_than_capping_the_device_count(tmp_path):
     """A 26th device gets a card on a sixth row, not a refusal."""
-    root, manager, view, _, _ = _view(tmp_path, 26)
+    root, manager, view, _, _ = _view(tmp_path, 26, mapped=False)
     try:
         assert len(view.cards) == 26
         assert view.cards[manager.devices[25].id].grid_info()["row"] == 5
@@ -218,7 +230,7 @@ def test_pending_build_is_cancelled_on_destroy(tmp_path):
 
 def test_card_omits_ip_and_connect(tmp_path):
     """The density view trades these for count; see the module docstring."""
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         card = view.cards[manager.devices[0].id]
         assert not hasattr(card, "_ip")
@@ -240,7 +252,7 @@ def test_card_shows_the_device_name(tmp_path):
 
 
 def test_clean_and_auto_callbacks_carry_the_device_id(tmp_path):
-    root, manager, view, cleaned, autoed = _view(tmp_path, 3)
+    root, manager, view, cleaned, autoed = _view(tmp_path, 3, mapped=False)
     try:
         target = manager.devices[1]
         view.cards[target.id]._clean._interactive._on_click()
@@ -348,7 +360,7 @@ def test_alert_turns_the_panel_red_and_shows_the_high_chip(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_adding_a_device_does_not_rebuild_existing_cards(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 3)
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         before = {d.id: id(view.cards[d.id]) for d in manager.devices}
         view.add_device(manager.add_device())
@@ -361,7 +373,7 @@ def test_adding_a_device_does_not_rebuild_existing_cards(tmp_path):
 
 
 def test_removing_a_device_regrids_the_survivors(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 7)
+    root, manager, view, _, _ = _view(tmp_path, 7, mapped=False)
     try:
         victim = manager.devices[0].id
         survivor = manager.devices[6].id
@@ -382,7 +394,7 @@ def test_removing_a_device_regrids_the_survivors(tmp_path):
 
 
 def test_render_device_reports_an_unknown_id(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert view.render_device(manager.devices[0].id) is True
         assert view.render_device("no-such-device") is False
@@ -391,7 +403,7 @@ def test_render_device_reports_an_unknown_id(tmp_path):
 
 
 def test_caption_counts_devices_and_slots(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 3)
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         total = len(manager.devices)
         assert view.caption(total) == "3 devices · 0 connected · 3 of 25 slots"
@@ -406,7 +418,7 @@ def test_caption_counts_devices_and_slots(tmp_path):
 
 
 def test_caption_singular_for_one_device(tmp_path):
-    root, _, view, _, _ = _view(tmp_path, 1)
+    root, _, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert view.caption(1).startswith("1 device ·")
     finally:
@@ -520,7 +532,7 @@ def _count_configures(card):
 
 
 def test_a_repaint_that_changes_nothing_touches_no_widget(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         card = view.cards[manager.devices[0].id]
         calls = _count_configures(card)
@@ -532,7 +544,7 @@ def test_a_repaint_that_changes_nothing_touches_no_widget(tmp_path):
 
 
 def test_a_temperature_change_repaints_only_the_temperature(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         device = manager.devices[0]
         card = view.cards[device.id]
@@ -552,7 +564,7 @@ def test_a_temperature_change_repaints_only_the_temperature(tmp_path):
 
 
 def test_a_connection_change_repaints_only_the_status(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         device = manager.devices[0]
         card = view.cards[device.id]
@@ -588,7 +600,7 @@ def test_wording_updates_when_the_state_changes_within_one_treatment(tmp_path):
 
 
 def test_force_repaints_a_screen_that_may_be_stale(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 1)
+    root, manager, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         card = view.cards[manager.devices[0].id]
         calls = _count_configures(card)
@@ -616,7 +628,7 @@ def test_a_renamed_device_repaints_its_name(tmp_path):
 
 def test_a_hidden_view_declines_to_render(tmp_path):
     """A hidden 25-card grid must not repaint for nobody to see."""
-    root, manager, view, _, _ = _view(tmp_path, 3)
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         device = manager.devices[0]
         view.hide()
@@ -644,7 +656,7 @@ def test_show_repaints_what_was_declined_while_hidden(tmp_path):
 
 
 def test_show_picks_up_devices_added_while_hidden(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 3)
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         view.hide()
         view.add_device(manager.add_device())
@@ -659,7 +671,7 @@ def test_show_picks_up_devices_added_while_hidden(tmp_path):
 
 
 def test_on_device_count_changed_reflows_the_grid_while_visible(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 7)
+    root, manager, view, _, _ = _view(tmp_path, 7, mapped=False)
     try:
         survivor = manager.devices[6].id
         victim = manager.devices[0].id
@@ -683,7 +695,7 @@ def test_the_view_declares_its_padding_for_the_host(tmp_path):
     grid has no scrollbar to make room for.
     """
     from emcc.views.list_view import ListView
-    root, _, view, _, _ = _view(tmp_path, 1)
+    root, _, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert view.padding == {"padx": theme.PAGE_PAD_X,
                                 "pady": theme.PAGE_PAD_Y}
@@ -747,10 +759,56 @@ def _contract_members():
 
 
 def test_the_contract_is_readable_and_non_trivial():
-    """Guard the guard: an empty derivation would pass everything below."""
+    """Guard the guard: an empty derivation would pass everything below.
+
+    **Four assertions over three failure modes, because no one of them covers
+    another.** This began as `len(methods) >= 8` alone, which went stale the
+    moment `add_device`/`remove_device` left the contract -- a legitimate
+    deletion breaking a guard that had nothing to say about it. The answer was
+    not to drop the count but to stop asking it to do three jobs.
+
+    Two of the three are what the floor was standing in for, and both can be
+    asserted directly:
+
+    *Non-vacuity* -- `DeviceView` declares public members at all. That is the
+    real failure being guarded: an empty derivation makes every conformance
+    assertion below pass by having nothing to check. It survives any deletion,
+    because it fails only when the contract is genuinely empty.
+
+    *Completeness* -- every public name is classified as a method or a
+    property. This is the `caption` bug in general form: the original defect
+    was a hand-written list of eight names that silently omitted one, and a
+    classifier that quietly drops a member fails here the same way. The two
+    sides come from the same `vars()` call but by different routes -- raw keys
+    against the classified output -- so a broken filter cannot satisfy both.
+
+    `caption` keeps its own line: general checks do not remember specific
+    incidents, and that one was found the hard way.
+
+    **And the literal stays, alongside them, because it catches a third thing
+    neither can.** A derived check cannot detect an *unintended* contract
+    shrink: it is computed from the contract, so it passes whatever the
+    contract says. Only a number fixed from outside notices that the contract
+    got smaller when nobody meant it to. That makes this a ratchet -- its
+    value moves when the contract legitimately changes, deliberately and with
+    the reason recorded, not as bookkeeping.
+
+    7 since `add_device`/`remove_device` left the contract. Their
+    implementations remain and this file calls them on a view **nine** times
+    -- `view.add_device` 5, `view.remove_device` 4; a further 6 calls in this
+    file go to `manager`, which is a different object and not evidence about
+    the view at all. What was dead is `ViewHost`'s routing, not the methods.
+    """
     methods, properties = _contract_members()
-    assert len(methods) >= 8, methods
+    public = {name for name in vars(DeviceView) if not name.startswith("_")}
+
+    assert public, "DeviceView declares no public members -- derivation vacuous"
+    assert set(methods) | properties == public, (
+        f"unclassified by _contract_members: {public - (set(methods) | properties)}"
+    )
     assert "caption" in methods, "derivation missed caption -- the original bug"
+    # The ratchet. Decrement only with the contract change that justifies it.
+    assert len(methods) >= 7, methods
     assert properties >= {"widget", "padding"}, properties
 
 
@@ -780,7 +838,7 @@ def test_padding_is_a_mapping_the_host_can_splat(tmp_path):
     `TypeError: argument after ** must be a mapping` inside the host's pack
     call. It was a tuple until the seam landed.
     """
-    root, _, view, _, _ = _view(tmp_path, 1)
+    root, _, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert dict(**view.padding) == {"padx": theme.PAGE_PAD_X,
                                        "pady": theme.PAGE_PAD_Y}
@@ -790,7 +848,7 @@ def test_padding_is_a_mapping_the_host_can_splat(tmp_path):
 
 def test_the_view_is_its_own_widget(tmp_path):
     """The host packs `view.widget`; for this view that is the view."""
-    root, _, view, _, _ = _view(tmp_path, 1)
+    root, _, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert view.widget is view
     finally:
@@ -798,7 +856,7 @@ def test_the_view_is_its_own_widget(tmp_path):
 
 
 def test_set_devices_replaces_the_list_and_reconciles(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 5)
+    root, manager, view, _, _ = _view(tmp_path, 5, mapped=False)
     try:
         keep = manager.devices[:2]
         view.set_devices(keep)
@@ -810,7 +868,7 @@ def test_set_devices_replaces_the_list_and_reconciles(tmp_path):
 
 
 def test_remove_device_drops_the_card_and_reflows(tmp_path):
-    root, manager, view, _, _ = _view(tmp_path, 7)
+    root, manager, view, _, _ = _view(tmp_path, 7, mapped=False)
     try:
         survivor = manager.devices[6].id
         view.remove_device(manager.devices[0].id)
@@ -824,7 +882,7 @@ def test_remove_device_drops_the_card_and_reflows(tmp_path):
 
 def test_add_device_is_idempotent(tmp_path):
     """The host may re-send on a dirty show; a duplicate must not double up."""
-    root, manager, view, _, _ = _view(tmp_path, 2)
+    root, manager, view, _, _ = _view(tmp_path, 2, mapped=False)
     try:
         extra = manager.add_device()
         view.add_device(extra)
@@ -910,7 +968,7 @@ def test_ctx_supplies_the_shutdown_predicate(tmp_path):
 
 def test_a_view_built_without_a_host_still_works(tmp_path):
     """Tests and the capture scripts build it directly; it must not require a host."""
-    root, _, view, _, _ = _view(tmp_path, 3)
+    root, _, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         assert view._ctx.is_shutting_down() is False
         assert len(view.cards) == 3
@@ -991,7 +1049,7 @@ def test_caption_is_coherent_after_a_device_is_added_while_hidden(tmp_path):
     Both existing caption tests miss it because both read a freshly-synced
     visible view, which is the one state where the two sources agree.
     """
-    root, manager, view, _, _ = _view(tmp_path, 3)
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
     try:
         view.hide()
         # Every device connected, so the stale total is genuinely exceeded by
@@ -1073,7 +1131,7 @@ def test_heading_is_the_dashboard_subhead(tmp_path):
     right until the contract catches up, after which the derived property
     check covers its presence and this covers its value.
     """
-    root, _, view, _, _ = _view(tmp_path, 1)
+    root, _, view, _, _ = _view(tmp_path, 1, mapped=False)
     try:
         assert view.heading == theme.DASH_SUBHEAD
         assert view.heading == "DASHBOARD OVERVIEW"
@@ -1143,7 +1201,7 @@ def test_trimming_rows_after_the_grid_is_destroyed_does_not_raise(tmp_path):
     Swallowing it is right -- there is no height left to reserve -- but the
     catch is now `TclError` rather than everything.
     """
-    root, _, view, _, _ = _view(tmp_path, 6)
+    root, _, view, _, _ = _view(tmp_path, 6, mapped=False)
     try:
         view._grid.destroy()
 
@@ -1152,5 +1210,31 @@ def test_trimming_rows_after_the_grid_is_destroyed_does_not_raise(tmp_path):
             view._grid.grid_rowconfigure(3, minsize=0, weight=0)
 
         view._trim_rows(3)   # must not raise
+    finally:
+        root.destroy()
+
+
+def test_the_device_fingerprint_is_id_and_name_in_display_order(tmp_path):
+    """`ViewHost.show` reseeds on a difference here, so this is the seam.
+
+    Ids alone would miss a rename -- the name is rendered, so a card under a
+    stale name is a visible defect with no fingerprint change to trigger the
+    reseed. Order is included because `sync` grids from `_devices` order.
+    """
+    root, manager, view, _, _ = _view(tmp_path, 3, mapped=False)
+    try:
+        devices = manager.devices
+        assert view.device_fingerprint() == tuple((d.id, d.name) for d in devices)
+
+        # A rename must move it: this is the case ids-only would miss.
+        before = view.device_fingerprint()
+        devices[0].config.device_name = "Renamed"
+        assert view.device_fingerprint() != before
+        assert view.device_fingerprint()[0][1] == "Renamed"
+
+        # Membership moves it, and the surviving pairs keep their order.
+        after_add = view.device_fingerprint()
+        view.remove_device(devices[-1].id)
+        assert view.device_fingerprint() == after_add[:-1]
     finally:
         root.destroy()

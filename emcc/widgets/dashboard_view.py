@@ -528,6 +528,29 @@ class DashboardView(ctk.CTkFrame):
 
     # -- reconciliation ---------------------------------------------------
 
+    def device_fingerprint(self) -> tuple[tuple[str, str], ...]:
+        """The (id, name) pairs this view holds, in display order.
+
+        `ViewHost.show` compares this against its own record and reseeds only
+        on a difference, which replaces the `_dirty` flag and the obligation
+        to call `note_device_set_changed`. Order is significant: `sync` sets
+        `_order` from `_devices`, so a reorder is a real display change.
+
+        **(id, name), not ids alone.** The name is rendered (`device_name`
+        above), so a rename that changed nothing else would leave a stale card
+        under an id-only fingerprint. It is cheap to include because names
+        change rarely -- unlike connection or temperature, which would reseed
+        a busy fleet on every poll.
+
+        **The residual, stated because it is a judgement and not a proof:**
+        field selection is a choice, and any rendered field left out of this
+        tuple can go stale. What improves over the flag it replaces is not
+        that staleness becomes impossible -- it is that the failure is
+        uniform across views and attaches to the *field* omitted, rather than
+        to whichever view nobody remembered to mark dirty.
+        """
+        return tuple((d.id, d.name) for d in self._devices)
+
     def set_devices(self, devices: Sequence[DeviceState]) -> None:
         """Replace the device list and reconcile the grid.
 
