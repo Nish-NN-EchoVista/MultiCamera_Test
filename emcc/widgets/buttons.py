@@ -65,9 +65,29 @@ def _paint_diff(owner, widget, **props) -> None:
     (receiver, property) pairs, the 19 that `_paint` writes have `_paint` as
     their only writer. The other 4 are disjoint -- `TempButton._caption`'s
     text and colour belong to `_sync_alert` alone, and `cursor` to
-    `Interactive` -- so neither can stale this cache. **Re-check that if a
-    second writer is ever added**; the failure is silent and in the direction
-    that looks correct.
+    `Interactive` -- so neither can stale this cache.
+
+    **That AST covers project code, and project code is not the whole of the
+    risk: a library that already writes was never "added" by anyone.**
+    CustomTkinter reapplies colours on an appearance-mode change and geometry
+    on a scaling change, and no scan of `emcc/` can see either. Measured
+    rather than assumed:
+
+        set_appearance_mode / set_default_color_theme in emcc/   0 calls
+            -> colour reapplication is unreachable, not just unlikely
+        the four controls build CTkFrame and CTkLabel only
+            CTkFrame._set_scaling / CTkLabel._set_scaling
+            touch no property this diffs
+        CTkButton._set_scaling does write on a "text" path, but the write is
+            `self._text_label.configure(font=...)` -- FONT, not text
+
+    So CTk's own writes are geometry and font: disjoint from the four
+    properties diffed here.
+
+    **Re-check whenever ANY writer of a diffed property appears -- including a
+    dependency's, which arrives without a commit in this repo.** A
+    CustomTkinter upgrade is an occasion to redo the measurement above. The
+    failure is silent and in the direction that looks correct.
 
     Images are deliberately not routed through here. `icons.get()` returns a
     fresh object per call, so an identity or equality test would never match
@@ -363,7 +383,26 @@ class TempButton(ctk.CTkFrame):
         self._interactive.refresh()
 
     def _sync_alert(self) -> None:
-        """Swap the badge and the hint. No-ops unless the threshold was crossed."""
+        """Swap the badge and the hint. No-ops unless the threshold was crossed.
+
+        **`_caption` keeps its text when unpacked, and that is unobservable.**
+        The `else` branch below calls `pack_forget()` without clearing the
+        text, so a card that has been in alert and left it still holds
+        "Exceeds threshold" on a hidden widget. Checked rather than assumed:
+        this caption has exactly **one** pack site -- the `pack` in the alert
+        branch -- and the `configure(text=...)` two lines above it always
+        runs first. There is no path that re-packs it without setting the
+        text, so the stale value cannot reach the screen.
+
+        Left as it is deliberately. Clearing the text on hide would be two
+        lines and would look tidier, but it would also be an untested branch
+        guarding nothing, which is the shape this file spent the night
+        removing. **If a second pack site is ever added, clear the text on
+        hide** -- that is the change which makes the staleness reachable.
+
+        Predates the paint-diff: verified by running the same probe against
+        `b516d7e`, byte-identical result.
+        """
         alert = self._device.temperature_alert
         if alert == self._alert_shown:
             return
