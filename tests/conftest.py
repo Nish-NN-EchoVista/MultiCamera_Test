@@ -110,19 +110,25 @@ def make_app(config, attempts: int = 5):
     two-construction control. Nothing cumulative fails at #2.
 
     THE CAUSE OF THE TRANSIENT IS NOT ESTABLISHED. Every retry captured with
-    instrumentation carried one signature -- the Tester reports six: two in
-    the suites above, one in a two-construction control, three during visual
-    capture arms:
+    instrumentation carried one signature:
 
         Can't find a usable tk.tcl in the following directories:
           .../Python312/tcl/tcl8.6/tk8.6
 
-    "Every instrumented" rather than a count, because an earlier version of
-    this paragraph said "Both measured retries" -- which stated the observed
-    set as closed at two while the correction it was making was to a set
-    ("all from the same underlying cause") stated as closed at three. A
-    replacement that closes a set inherits the defect the same way a
-    replacement that names a cause does.
+    NO COUNT HERE, deliberately, and the history is the argument for that.
+    This paragraph has carried three different numbers for the size of that
+    observed set: "both" (two), then "six" on a correction, and the verified
+    figure is three -- two in one 119-root suite and one in a
+    two-construction control, with zero in the 122- and 129-root suites. The
+    rate paragraph above keeps its count because it is a rate with a named
+    denominator; this claim needs none.
+
+    The coverage form was true at all three numbers, which is the whole
+    reason to prefer it: "every retry the instrument captured" asserts what
+    was observed, where "both" or "six" asserts how many exist. A replacement
+    that closes a set inherits the defect the same way a replacement that
+    names a cause does -- and a count slips past the check that catches a
+    named cause, because a count reads as a measurement.
 
     These have been seen at other times, without instrumentation:
 
