@@ -1061,6 +1061,29 @@ def test_logo_is_truly_centred_not_the_gap_midpoint(app):
     The gap midpoint between the heading block and the legend moves as the
     device count changes ("1 device configured" vs "25 devices configured"),
     so the logo is placed at the true centre of the row instead.
+
+    ON THE SCALING FACTOR, because three sessions independently concluded
+    this assertion misattributes and it does not. Both sides are divided by
+    `factor` while the 2.0 tolerance is not, so a wrongly-1.0 factor scales
+    the measured residual 2.25x while the tolerance stays put -- the
+    mechanism is real. The consequence is not, at this layout:
+
+        residual                0.500 device px
+        assertion at f=2.25     0.222   tolerance 2.0   headroom 1.778
+        assertion at f=1.0      0.500   tolerance 2.0   headroom 1.500
+
+    Measured, and measured the other way too: forcing `canvas_util.scaling`
+    to return 1.0 leaves all four logo tests PASSING. So the window in which
+    a wrong factor makes this test fail while accusing the layout is a
+    residual of 2.0 to 4.5 device pixels -- four times the actual one. Below
+    2.0 nothing fails; at or above 4.5 it fails at the correct factor too,
+    where "not at the row's true centre" is the right accusation anyway.
+
+    Left exactly as it is, deliberately. The message is not softened: after
+    F9 (`e5de0f9`) a wrong factor cannot be produced -- `scaling()` raises on
+    a non-widget instead of substituting 1.0, and its remaining fallback is
+    unreachable in production -- so the only way this can now fire is a real
+    centring regression, which is precisely what it says.
     """
     from emcc.widgets.canvas_util import scaling
 
