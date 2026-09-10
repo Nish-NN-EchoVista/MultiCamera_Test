@@ -89,12 +89,14 @@ class TitleBar(ctk.CTkFrame):
         self._title.pack(side="left", padx=(10, 0))  # gap-2.5
 
         badge = ctk.CTkFrame(
-            self._identity, corner_radius=6, fg_color=theme.EMCC_BG,
+            self._identity, corner_radius=theme.EMCC_RADIUS,
+            fg_color=theme.EMCC_BG,
             border_width=1, border_color=theme.EMCC_BORDER,
         )
         badge.pack(side="left", padx=(12, 0))
         ctk.CTkLabel(
-            badge, text=fonts.tracked("EMCC", 0.12), font=fonts.sans(10, 700),
+            badge, text=fonts.tracked("EMCC", theme.EMCC_TRACKING),
+            font=fonts.sans(10, 700),
             text_color=theme.EMCC_TEXT,
             height=12,
         ).pack(padx=8, pady=2)  # px-2 py-0.5

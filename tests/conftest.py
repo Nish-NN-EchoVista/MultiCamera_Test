@@ -57,20 +57,46 @@ def _tk_isolation():
     icons.clear_cache()
     fonts.clear_cache()
 
-    # Force collection so Tcl actually releases the interpreter's resources
-    # now rather than whenever CPython gets round to it. Without this, a suite
-    # that builds ~50 roots in one process can exhaust them, and Tk fails at
-    # *creation* with `couldn't read file ".../init.tcl": No error` -- a
-    # confusing failure that has nothing to do with the test that hits it.
+    # Release the Python-side objects that hold Tcl resources -- widget
+    # wrappers, `CTkImage` and `CTkFont` handles -- promptly rather than
+    # whenever CPython gets round to it.
+    #
+    # It does NOT prevent interpreter exhaustion, and this comment used to say
+    # it did. That claim was wrong four ways:
+    #
+    #   * `make_app`'s own docstring below says of the same symptom that "the
+    #     file is present and valid, the open just transiently failed". The
+    #     two paragraphs contradicted each other in one file;
+    #   * collection provably cannot free the roots. CustomTkinter's
+    #     `ScalingTracker.window_dpi_scaling_dict` is written at three sites
+    #     and deleted from at none, so every root the process creates stays
+    #     strongly referenced for the life of the interpreter. Measured: three
+    #     roots created, given widgets and destroyed with `gc.collect()`
+    #     between, and the dict grew 1, 2, 3;
+    #   * this suite builds 320-plus roots in one process with
+    #     `failures=0 errors=0 skipped=0` -- six times the claimed threshold,
+    #     no exhaustion;
+    #   * the failure signature is a *path lookup* -- `couldn't read file
+    #     ".../init.tcl"` -- and leaked root objects cannot make a file lookup
+    #     fail.
+    #
+    # The call is kept rather than removed: it still frees what is freeable,
+    # and its value here is unmeasured rather than shown to be nil. Removing
+    # it would be a behaviour change on no evidence, which is the same error
+    # in the other direction.
     gc.collect()
 
 
 def make_app(config, attempts: int = 5):
     """Construct an `App`, retrying a transient Tk start-up failure.
 
-    Creating ~50 Tk interpreters in one process intermittently fails on Windows
-    while the interpreter is being initialised. Observed symptoms, all from the
-    same underlying cause:
+    Creating Tk interpreters in one process intermittently fails on Windows
+    while the interpreter is being initialised. Not a function of how many:
+    an earlier version of this docstring said "~50", and the observed retries
+    land at arbitrary positions -- #4 and #73 of a 119-root run -- which a
+    cumulative mechanism cannot produce. The rate is low and the position is
+    unrelated to the count. Observed symptoms, all from the same underlying
+    cause:
 
         Can't find a usable init.tcl ...
           couldn't read file ".../tcl8.6/init.tcl": No error
