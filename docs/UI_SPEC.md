@@ -87,11 +87,17 @@ emerald.
 | Capacity | none | the export's "supports up to 25" was a demo limit; removed |
 
 The first ten rows are generated from `theme.py` by `tools/gen_ui_spec.py`.
-The three below the marker are hand-written because they are not `theme`
-constants: `Separator`'s 1px and 4px are literals in `device_card.py`,
-`Capacity` is prose, and `Badge radius` says `4 / 6` where `theme` has only
-`BADGE_RADIUS = 4` -- generating it would rewrite content rather than refresh
-a value, so it is left alone and flagged.
+The three below the marker are hand-written because their values are not
+`theme` constants:
+
+* `Separator` -- the 1px width and 4px margins are literals in `device_card.py`.
+* `Capacity` -- prose.
+* `Badge radius` -- **the `4 / 6` is correct: there are two badges.** The red
+  alert chip is `theme.BADGE_RADIUS = 4` (`buttons.py`, `dashboard_view.py`);
+  the EMCC wordmark is `corner_radius=6`, hardcoded at `title_bar.py:92`.
+  Both appear in the design (`rounded` and `rounded-md`). It is un-generatable
+  for the same reason as `Separator` -- one of the two values is a literal
+  where a `theme` constant belongs, not because the row is wrong.
 
 Inner column insets are reproduced as designed: the section *labels* sit flush
 to each column's left edge while the controls below them are inset (`px-4` on

@@ -129,9 +129,11 @@ def render(name: str, module=theme) -> list[str]:
 #: a `theme` constant. Three rows of that table are deliberately OUTSIDE the
 #: generated block and stay hand-written:
 #:
-#:   Badge radius   the doc says "4 / 6"; theme has only BADGE_RADIUS = 4, so
-#:                  generating it would silently rewrite content rather than
-#:                  refresh a value. Flagged, not resolved here.
+#:   Badge radius   "4 / 6" is correct -- two badges. The alert chip uses
+#:                  theme.BADGE_RADIUS = 4; the EMCC wordmark uses a
+#:                  hardcoded corner_radius=6 at title_bar.py:92. Same
+#:                  category as Separator: one value is a literal where a
+#:                  theme constant belongs, so half the row is underivable.
 #:   Separator      1px and its 4px margins are literals in device_card.py,
 #:                  not theme constants. Transcribing them into this file
 #:                  would move the staleness rather than remove it.
