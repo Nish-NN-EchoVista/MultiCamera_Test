@@ -87,10 +87,15 @@ def open_temperature(app: "App", device_id: str) -> None:
     # otherwise match the *existing* PyGUI and dismiss the splash at once.
     existing = pygui_windows(device.ip)
 
-    error = launch_pygui(device.ip, app.config_manager.settings.pygui_path)
-    if error is not None:
-        app._errors.show_now(device.name, device.ip, error)
+    launch = launch_pygui(device.ip, app.config_manager.settings.pygui_path)
+    if launch.error is not None:
+        app._errors.show_now(device.name, device.ip, launch.error)
         return
+
+    # Held so `poll_pygui` can tell an early exit from a slow start. Replaced
+    # on every hand-off rather than accumulated: only the newest launch has a
+    # splash waiting on it, and an earlier PyGUI is expected to outlive EMCC.
+    app._pygui_proc = launch.process
 
     if device.connection.is_live:
         logger.info("%s released for the PyGUI hand-off", device.name)

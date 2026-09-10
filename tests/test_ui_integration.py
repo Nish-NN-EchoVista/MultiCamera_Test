@@ -831,6 +831,131 @@ def test_scenario_j_shutdown_closes_everything(app, tmp_path):
             mock.stop()
 
 
+class _StubSplash:
+    """The surface `handoff.poll_pygui` touches on a splash."""
+
+    alive = True
+
+    def __init__(self):
+        self.failed: list[str] = []
+        self.statuses: list[str] = []
+        self.closed = False
+
+    def fail(self, message: str) -> None:
+        self.failed.append(message)
+
+    def set_status(self, message: str) -> None:
+        self.statuses.append(message)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _StubApp:
+    """The surface `handoff.poll_pygui` touches on an App.
+
+    A stub rather than the `app` fixture, and not only for speed. Driving
+    this through the real App would mean a test writing the App's `_splash`,
+    `_splash_deadline` and `_splash_ready_polls` from outside `emcc/`, which
+    the facade scanner would then require in `_FACADE` -- four private names
+    declared as contract to make one test convenient. That is the trade
+    refused when `_errors` did the same thing.
+
+    And the wording above is deliberate: an earlier draft spelled those three
+    in the `fixture.attribute` form, which the scanner matches in prose. So
+    the docstring explaining that the names are NOT reached was itself the
+    thing that reported them reached, and the gate failed on it. Third time
+    that has happened in this file; describe the attribute, never spell the
+    access.
+    """
+
+    _shutting_down = False
+
+    def __init__(self, process=None, deadline_in=3600.0):
+        self._splash = _StubSplash()
+        self._splash_job = "pending"
+        self._splash_ready_polls = 0
+        self._splash_deadline = time.monotonic() + deadline_in
+        self._pygui_proc = process
+        self.scheduled: list[int] = []
+
+    def after(self, delay_ms, _callback):
+        self.scheduled.append(delay_ms)
+        return "job"
+
+
+class _ExitedProc:
+    pid = 4321
+
+    def __init__(self, code):
+        self._code = code
+
+    def poll(self):
+        return self._code
+
+
+@pytest.mark.parametrize("code, expected", [
+    (3, "exit code 3"),
+    (1, "exit code 1"),
+    (0, "closed before it finished starting"),
+])
+def test_a_pygui_that_exits_before_it_is_ready_is_reported_at_once(code, expected):
+    """A crash must not wait out the splash timeout.
+
+    `poll_pygui` inferred readiness from window enumeration alone, and a dead
+    process enumerates exactly like one that has not drawn yet -- so a crash
+    was indistinguishable from a slow start until `SPLASH_TIMEOUT_S` expired,
+    then reported as "did not start". The code said as much: *"a crash and a
+    slow start look identical otherwise"*. It was true because the `Popen` was
+    discarded at launch.
+
+    The deadline here is an hour out, so the timeout branch cannot fire. Any
+    failure reported is therefore from `poll()`, not from waiting.
+
+    Exit 0 is worded differently on purpose: a PyGUI the operator closed
+    during startup exits cleanly, and calling that a crash sends them to the
+    log for a fault that is not there.
+
+    Dies on: dropping the `poll()` check from `poll_pygui`, or reporting a
+    clean exit as a crash.
+    """
+    from emcc.shell import handoff
+
+    stub = _StubApp(process=_ExitedProc(code))
+    handoff.poll_pygui(stub, "10.0.0.7", [])
+
+    assert stub._splash.failed, "an exited PyGUI was not reported at all"
+    assert expected in stub._splash.failed[0], stub._splash.failed
+    assert stub.scheduled == [], (
+        f"it rescheduled instead of reporting: {stub.scheduled}"
+    )
+    assert not stub._splash.closed, "a failed launch must not read as success"
+
+
+def test_a_live_pygui_is_not_reported_as_exited():
+    """The other half: `poll()` returning None must not fail the splash.
+
+    Without this, "report an exited process" and "report every process" are
+    the same test -- the assertion above passes either way.
+
+    Dies on: treating any `poll()` result as an exit, i.e. `if code is not
+    None` written as `if code`.
+    """
+    from emcc.shell import handoff
+
+    class _Live:
+        pid = 99
+
+        def poll(self):
+            return None
+
+    stub = _StubApp(process=_Live())
+    handoff.poll_pygui(stub, "10.0.0.7", [])
+
+    assert stub._splash.failed == [], stub._splash.failed
+    assert stub.scheduled, "a live PyGUI should keep the poll loop running"
+
+
 def test_a_config_save_error_reaches_the_operator_dialog(app):
     """F12: the whole notification path rests on one unguarded assignment.
 

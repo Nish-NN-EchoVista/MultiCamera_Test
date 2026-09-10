@@ -153,6 +153,8 @@ class App(ctk.CTk):
         self._splash_job: str | None = None
         self._splash_deadline = 0.0
         self._splash_ready_polls = 0
+        #: The most recent PyGUI child, or None. See `shell/handoff.poll_pygui`.
+        self._pygui_proc: "subprocess.Popen | None" = None
 
         self._strip_caption()
 

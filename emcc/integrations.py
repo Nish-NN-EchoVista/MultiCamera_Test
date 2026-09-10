@@ -48,7 +48,7 @@ import sys
 from ctypes import wintypes
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
 logger = logging.getLogger("emcc.integration")
 
@@ -76,7 +76,7 @@ class PyGuiState(Enum):
     READY = "ready"
 
 
-#: PyGUI titles its window `Command Centre — <ip> (opened from EMCC)` when
+#: PyGUI titles its window `Command Centre â€” <ip> (opened from EMCC)` when
 #: launched by us -- see `PyGUI/app.py:_start_handoff_session`. Matching the
 #: IP as well as the marker keeps concurrent hand-offs distinct.
 _TITLE_MARKER = "opened from EMCC"
@@ -211,30 +211,48 @@ def _interpreter(root: Path) -> str:
     return str(candidate) if candidate.exists() else sys.executable
 
 
-def launch_pygui(ip: str, pygui_path: str) -> str | None:
-    """Launch PyGUI pointed at `ip`. Returns an error message, or None on success.
+class Launch(NamedTuple):
+    """The outcome of a hand-off attempt.
 
-    Never raises: a failed hand-off should report itself and leave EMCC running.
+    `error` is a message for the operator, or `None` on success. `process` is
+    the launched child, or `None` if nothing was started.
+
+    **The process is returned rather than discarded**, and that is the whole
+    point of this type. `poll_pygui` previously had no way to tell a crash
+    from a slow start -- its own comment said so -- because readiness was
+    inferred from window enumeration and a dead process enumerates exactly
+    like one that has not drawn yet. A `Popen` answers the question directly.
+    """
+
+    error: str | None = None
+    process: "subprocess.Popen | None" = None
+
+
+def launch_pygui(ip: str, pygui_path: str) -> Launch:
+    """Launch PyGUI pointed at `ip`.
+
+    Never raises: a failed hand-off should report itself and leave EMCC
+    running.
     """
     ip = (ip or "").strip()
     if not ip:
-        return "This device has no IP address set."
+        return Launch("This device has no IP address set.")
 
     root = Path(pygui_path).expanduser()
     entry = root / PYGUI_ENTRY
 
     if not root.is_dir():
-        return (f"PyGUI was not found at:\n{root}\n\n"
-                "Set 'pygui_path' in config.json to its folder.")
+        return Launch(f"PyGUI was not found at:\n{root}\n\n"
+                      "Set 'pygui_path' in config.json to its folder.")
     if not entry.is_file():
-        return (f"PyGUI is missing {PYGUI_ENTRY} at:\n{root}\n\n"
-                "Set 'pygui_path' in config.json to its folder.")
+        return Launch(f"PyGUI is missing {PYGUI_ENTRY} at:\n{root}\n\n"
+                      "Set 'pygui_path' in config.json to its folder.")
 
     handoff = os.environ.copy()
     handoff[ENV_HANDOFF_IP] = ip
 
     try:
-        subprocess.Popen(
+        process = subprocess.Popen(
             [_interpreter(root), PYGUI_ENTRY],
             cwd=str(root),
             env=handoff,
@@ -247,7 +265,7 @@ def launch_pygui(ip: str, pygui_path: str) -> str | None:
         )
     except OSError as exc:
         logger.error("PyGUI hand-off for %s failed to launch: %s", ip, exc)
-        return f"PyGUI could not be started:\n{exc}"
+        return Launch(f"PyGUI could not be started:\n{exc}")
 
-    logger.info("handed %s over to PyGUI (%s)", ip, root)
-    return None
+    logger.info("handed %s over to PyGUI (%s), pid %s", ip, root, process.pid)
+    return Launch(process=process)

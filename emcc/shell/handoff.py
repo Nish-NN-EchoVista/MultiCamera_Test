@@ -75,12 +75,24 @@ def show_launch_splash(
         app._splash.close()
 
     splash = LaunchSplash(app, on_dismiss=app._on_splash_dismissed)
-    if not splash.show(f"Launching PyGUI for {name}…"):
+    if not splash.show(f"Launching PyGUI for {name}â€¦"):
         return                      # frames not ready; go without
     app._splash = splash
     app._splash_deadline = time.monotonic() + SPLASH_TIMEOUT_S
     app._splash_ready_polls = 0
     app._poll_pygui(ip, existing)
+
+
+def _exit_message(code: int) -> str:
+    """Operator-facing wording for a child that exited before it was ready.
+
+    Distinguished on the code because "crashed" is wrong for a clean exit: a
+    PyGUI the operator closed during startup exits 0, and telling them it
+    crashed would send them to the log for a fault that is not there.
+    """
+    if code == 0:
+        return "PyGUI closed before it finished starting."
+    return f"PyGUI stopped before it started (exit code {code}) — see logs/emcc.log"
 
 
 def poll_pygui(app: "App", ip: str, existing: list[int]) -> None:
@@ -89,6 +101,22 @@ def poll_pygui(app: "App", ip: str, existing: list[int]) -> None:
     splash = app._splash
     if splash is None or not splash.alive or app._shutting_down:
         return
+
+    # Checked before the window probe, because a process that has exited
+    # cannot become READY and enumerates exactly like one still drawing.
+    #
+    # This is what the timeout branch below used to absorb: its comment says
+    # "a crash and a slow start look identical otherwise", which was true
+    # while the process handle was discarded. Now a crash is reported in one
+    # poll interval instead of after SPLASH_TIMEOUT_S, and with its exit code.
+    process = getattr(app, "_pygui_proc", None)
+    if process is not None:
+        code = process.poll()
+        if code is not None:
+            logger.error("PyGUI for %s exited with code %s before it was ready",
+                         ip, code)
+            splash.fail(_exit_message(code))
+            return
 
     state = pygui_state(ip, ignore=existing)
     if state is PyGuiState.READY:
@@ -103,14 +131,14 @@ def poll_pygui(app: "App", ip: str, existing: list[int]) -> None:
     else:
         app._splash_ready_polls = 0
         if state is PyGuiState.STARTING:
-            splash.set_status(f"Starting interface — {ip}…")
+            splash.set_status(f"Starting interface â€” {ip}â€¦")
 
     if time.monotonic() >= app._splash_deadline:
         # Report rather than vanish: a crash and a slow start look
         # identical otherwise, and the operator is left guessing.
         logger.warning("PyGUI did not appear for %s within %.0fs",
                        ip, SPLASH_TIMEOUT_S)
-        splash.fail("PyGUI did not start — see logs/emcc.log")
+        splash.fail("PyGUI did not start â€” see logs/emcc.log")
         return
 
     app._splash_job = app.after(
