@@ -109,13 +109,22 @@ def make_app(config, attempts: int = 5):
     retries land at constructions #4 and #73 of 119 and at #2 of a
     two-construction control. Nothing cumulative fails at #2.
 
-    THE CAUSE OF THE TRANSIENT IS NOT ESTABLISHED. Both measured retries
-    carried:
+    THE CAUSE OF THE TRANSIENT IS NOT ESTABLISHED. Every retry captured with
+    instrumentation carried one signature -- the Tester reports six: two in
+    the suites above, one in a two-construction control, three during visual
+    capture arms:
 
         Can't find a usable tk.tcl in the following directories:
           .../Python312/tcl/tcl8.6/tk8.6
 
-    and these have been seen at other times:
+    "Every instrumented" rather than a count, because an earlier version of
+    this paragraph said "Both measured retries" -- which stated the observed
+    set as closed at two while the correction it was making was to a set
+    ("all from the same underlying cause") stated as closed at three. A
+    replacement that closes a set inherits the defect the same way a
+    replacement that names a cause does.
+
+    These have been seen at other times, without instrumentation:
 
         Can't find a usable init.tcl ...
           couldn't read file ".../tcl8.6/init.tcl": No error
