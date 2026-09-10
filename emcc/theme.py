@@ -435,6 +435,11 @@ DASH_CTRL_PAD = (10, 5)
 #: at this density the dot reads as a legend key rather than a live indicator.
 DASH_DOT = 6
 
+#: The List view sub-header heading. Raw words -- `SubHeader` applies the
+#: letter-spacing, so the view owns the wording and the shell owns how it
+#: looks, the same division as `caption`.
+LIST_SUBHEAD = "DEVICE CONTROLLERS"
+
 DASH_SUBHEAD = "DASHBOARD OVERVIEW"
 DASH_LABEL = "DEVICE"
 
