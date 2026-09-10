@@ -150,7 +150,7 @@ class ListView:
         return theme.LIST_SUBHEAD
 
     def caption(self, total: int) -> str:
-        return (f"{total} device{'' if total == 1 else 's'} configured · "
+        return (f"{total} device{'' if total == 1 else 's'} configured Â· "
                 "click Connect to establish TCP connection")
 
     def show(self) -> None:
@@ -172,6 +172,30 @@ class ListView:
     def set_devices(self, devices: Sequence[DeviceState]) -> None:
         self._devices = list(devices)
         self.rebuild()
+
+    def device_fingerprint(self) -> tuple[tuple[str, str], ...]:
+        """Built cards followed by devices still queued to be built.
+
+        NOT `self._devices`, and the difference is the whole point. The shell
+        appends a card in place through `new_card` without updating
+        `_devices`, so `_devices` is stale after any add -- a fingerprint from
+        it would report the view as behind and trigger the full rebuild this
+        mechanism exists to avoid.
+
+        NOT `order` alone either: `rebuild` streams cards one per idle tick,
+        so mid-build `order` holds only a prefix and the view would report
+        itself behind while it was merely unfinished.
+
+        Together they are exactly what the view holds. `rebuild` fills
+        `pending_devices` from `_devices` and pops from the front as it
+        appends to `order`, so the concatenation is the full set in display
+        order at every point during the build.
+        """
+        return tuple(
+            [(device_id, self.cards[device_id].device.name)
+             for device_id in self.order]
+            + [(device.id, device.name) for device in self.pending_devices]
+        )
 
     # -- building --------------------------------------------------------
 

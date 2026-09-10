@@ -55,7 +55,6 @@ class ViewHost:
         self._active_name: str | None = None
         #: Views whose device set is behind. A dirty view receives nothing
         #: until it is shown, at which point the host re-sends `set_devices`.
-        self._dirty: set[str] = set()
         self._failures: dict[str, int] = {}
         self._broken: set[str] = set()
         #: Every contained failure, cumulatively. **Never cleared, not even by
@@ -119,14 +118,23 @@ class ViewHost:
         if view is None:
             view = self._factories[name](self._parent, self._ctx)
             self._views[name] = view
-            self._dirty.add(name)
 
         self._active_name = name
         view.widget.pack(fill="both", expand=True, **view.padding)
 
-        if name in self._dirty:
+        # Ask the view what it holds; re-seed only if it differs from the
+        # authoritative set. No flag, and no caller obliged to announce a
+        # change -- which is what F11 was about. A fresh view reports an
+        # empty fingerprint and is therefore seeded on its first `show`
+        # without a special case.
+        #
+        # `_call` so a view that raises here is contained like any other
+        # routed call. On containment it returns `None`, which differs from
+        # any real fingerprint, so the view is re-seeded -- the safe
+        # direction.
+        if self._call(name, "device_fingerprint") != tuple(
+                (device.id, device.name) for device in devices):
             self._call(name, "set_devices", devices)
-            self._dirty.discard(name)
         self._call(name, "show")
 
         # Deliberately NOT through `_call`. Containment exists because the
@@ -164,11 +172,17 @@ class ViewHost:
         # while hidden marks it dirty" -- while the code dirtied regardless
         # of whether anything had arrived.
         #
-        # A view now goes dirty when the device **set** actually changes
-        # while it is not active: see `note_device_set_changed`. Device
-        # *state* -- connect, temperature, fault -- reaches only the active
-        # view via `render_device`, which never dirties, so a merely busy
-        # fleet no longer forces a rebuild either.
+        # There is no dirty flag any more either. `show` asks the view for
+        # its `device_fingerprint()` and re-seeds only if it differs from the
+        # authoritative set, so nothing needs marking and no caller needs to
+        # announce a change. Device *state* -- connect, temperature, fault --
+        # is outside the fingerprint and reaches only the active view via
+        # `render_device`, so a merely busy fleet still forces no rebuild.
+        #
+        # An earlier version of this comment pointed at
+        # `note_device_set_changed`, which F11 deleted. Deleting a method
+        # strands every comment that named it, and a comment naming a
+        # mechanism is the last thing a reader checks.
         self._active_name = None
 
     # -- routing ---------------------------------------------------------
@@ -187,66 +201,6 @@ class ViewHost:
         if name is None:
             return False
         return bool(self._call(name, "render_device", device_id))
-
-    def add_device(self, device: DeviceState, total: int) -> None:
-        """A device appeared: tell every clean view, then the new count."""
-        for name in list(self._views):
-            if name in self._dirty:
-                continue
-            self._call(name, "add_device", device)
-            self._call(name, "on_device_count_changed", total)
-
-    def remove_device(self, device_id: str, total: int) -> None:
-        """A device went away: tell every clean view, then the new count."""
-        for name in list(self._views):
-            if name in self._dirty:
-                continue
-            self._call(name, "remove_device", device_id)
-            self._call(name, "on_device_count_changed", total)
-
-    def note_device_set_changed(self, mutated: str | None = None) -> None:
-        """A device was added or removed: every view except `mutated` is behind.
-
-        `mutated` is the view the caller updated in place, which therefore
-        stays clean. Every other view is marked dirty and gets the whole
-        truth via `set_devices` when next shown -- never a partial update
-        applied to a stale set, which is the rule recorded in
-        `decisions.json`.
-
-        **`mutated`, not the ACTIVE view.** This excluded `self._active_name`
-        until it was measured, on the assumption that the view on screen is
-        the one the caller changed. That is false: `App._view()` is hardwired
-        to the list view regardless of what is displayed, so with the
-        Dashboard up, `_add_device` appended to the hidden List and this
-        method then dirtied the List -- which was already current -- and left
-        the Dashboard, which was stale, clean. Measured: manager 4 devices,
-        list view 4 cards, Dashboard 3, `_dirty == {"list"}`, and the
-        Dashboard still 3 after a full round trip. Permanently stale, plus a
-        needless full rebuild of the List on the way back.
-
-        Latent rather than live today, because the Dashboard has no add or
-        remove control so neither mutator is reachable while it is active.
-        `_add_device` is in `_FACADE_NAMES` though, so it is reachable by
-        design from outside the GUI, and adding a Dashboard add-control would
-        make it live and silently wrong.
-
-        This exists because the host's own `add_device`/`remove_device`
-        routing has **no callers**: the shell mutates the list view directly
-        through `new_card`. Until that is wired, this is what tells the other
-        views they have missed something, and without it dropping the
-        dirty-on-hide would leave a hidden Dashboard rendering a stale grid.
-        """
-        for name in self._views:
-            if name != mutated:
-                self._dirty.add(name)
-
-    def set_devices(self, devices: Sequence[DeviceState]) -> None:
-        """Re-seed the active view; mark the rest dirty rather than updating."""
-        for name in list(self._views):
-            if name == self._active_name:
-                self._call(name, "set_devices", devices)
-            else:
-                self._dirty.add(name)
 
     # -- lifecycle -------------------------------------------------------
 

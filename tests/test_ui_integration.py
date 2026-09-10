@@ -1802,6 +1802,11 @@ def test_the_host_refreshes_the_chrome_on_every_show():
             self.widget = _Widget()
             self.padding = {}
         def set_devices(self, devices): pass
+        # The host asks every view for this on `show`. A stub without it is
+        # contained, logged as a view fault, and re-seeded -- which is the
+        # safe direction but makes the stub a broken view rather than a
+        # minimal one.
+        def device_fingerprint(self): return ()
         def show(self): pass
         def hide(self): pass
         def shutdown(self): pass
@@ -1844,6 +1849,7 @@ def test_the_host_refresh_is_not_contained():
             self.widget = _Widget()
             self.padding = {}
         def set_devices(self, devices): pass
+        def device_fingerprint(self): return ()
         def show(self): pass
         def hide(self): pass
         def shutdown(self): pass
@@ -1962,10 +1968,14 @@ def test_a_device_added_while_hidden_still_reseeds(app):
     and the host's own `add_device` routing has no callers. The reseed on
     switch-back was the only thing correcting it.
 
-    So the dirty now comes from the change rather than from the hide.
+    Nothing marks it now: `show` asks the view what it holds and re-seeds
+    on a difference. So the property is asserted on the fingerprint rather
+    than on a flag -- the flag was the thing F11 removed, and a test naming it
+    would have had to be rewritten by whoever removed it.
 
-    Dies on: dropping `note_device_set_changed` from `_add_device`, or
-    narrowing it to skip inactive views.
+    Dies on: `ViewHost.show` seeding unconditionally-or-never, or
+    `device_fingerprint` reporting the authoritative set rather than what the
+    view actually holds.
     """
     _pump(app, 4)
     app._switch_view("dashboard")
@@ -1978,9 +1988,10 @@ def test_a_device_added_while_hidden_still_reseeds(app):
     app._add_device()
     _pump(app, 4)
 
-    assert "dashboard" in app.views._dirty, (
-        "the hidden view was not told the device set changed, so it will "
-        "render a stale grid when shown"
+    authoritative = tuple((d.id, d.name) for d in app.manager.devices)
+    assert dashboard.device_fingerprint() != authoritative, (
+        "the hidden view already reports the new device set, so nothing "
+        "would re-seed it and it would render a stale grid when shown"
     )
 
     seen, restore = _reseeds(app)
@@ -1994,22 +2005,25 @@ def test_a_device_added_while_hidden_still_reseeds(app):
     assert len(dashboard._devices) == before + 1
 
 
-def test_the_mutated_view_is_not_dirtied_by_its_own_change(app):
-    """The view that received the change is already correct.
+def test_the_view_that_received_the_change_is_not_reseeded(app):
+    """The view that received the change already holds it.
 
-    Dirtying it too would reinstate the rebuild this fix removes -- the next
-    switch away and back would reseed even though nothing was missed.
+    Re-seeding it would reinstate the rebuild `ef87d84` removed: the next
+    switch away and back would tear down every card although nothing was
+    missed.
 
-    Renamed from `test_the_active_view_is_not_dirtied_by_its_own_change`. The
-    old name asserted the premise that turned out to be false: the mutated
-    view and the active view are not the same thing, because `App._view()` is
-    hardwired to the list view. Here they coincide -- the list IS active --
-    which is why this passed while the Dashboard case was broken. See
-    `test_the_stale_view_is_the_one_reseeded_not_the_active_one` for the case
-    that separates them.
+    Twice renamed, and the history is the point. It began as
+    `..._the_active_view_is_not_dirtied_by_its_own_change`, which asserted a
+    premise that proved false -- the mutated view and the active view are not
+    the same thing, because `App._view()` is hardwired to the list view. Then
+    `..._the_mutated_view_...`, which named `mutated`, the parameter F11
+    deleted. **Both names encoded a mechanism, and each died with it.** This
+    one names the observable property, which is what survives the next
+    rewrite.
 
-    Dies on: `note_device_set_changed` dirtying every view rather than
-    excluding the one named by `mutated`.
+    Dies on: `device_fingerprint` reporting `_devices` rather than the built
+    cards -- the shell's `new_card` does not update `_devices`, so that
+    fingerprint reports the view as behind and re-seeds it.
     """
     _pump(app, 4)
     assert app.views.active_name == "list"
@@ -2017,6 +2031,21 @@ def test_the_mutated_view_is_not_dirtied_by_its_own_change(app):
     app._add_device()
     _pump(app, 4)
 
-    assert "list" not in app.views._dirty, (
-        "the mutated view was dirtied by a change it received itself"
+    authoritative = tuple((d.id, d.name) for d in app.manager.devices)
+    assert app.views.active.device_fingerprint() == authoritative, (
+        "the view that received the card does not report holding it, so it "
+        "will be re-seeded on the next switch back"
+    )
+
+    seen, restore = _reseeds(app)
+    try:
+        app._switch_view("dashboard")
+        _pump(app, 4)
+        app._switch_view("list")
+        _pump(app, 4)
+    finally:
+        restore()
+
+    assert "list" not in seen, (
+        f"the list was rebuilt after a change it received in place: {seen}"
     )

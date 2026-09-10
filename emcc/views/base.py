@@ -93,6 +93,31 @@ class DeviceView(Protocol):
     def set_devices(self, devices: Sequence[DeviceState]) -> None:
         """Replace what the view believes exists."""
 
+    def device_fingerprint(self) -> tuple[tuple[str, str], ...]:
+        """The `(id, name)` pairs this view holds, in display order.
+
+        The host compares this against the authoritative set on `show` and
+        re-seeds only on a difference, so a view reports what it *has* rather
+        than being told when it is behind.
+
+        **Report what is displayed plus what is queued to be**, not a private
+        record of the last `set_devices`. `ListView` builds progressively, so
+        its built cards and its pending devices together are what it holds;
+        either alone is wrong in one direction.
+
+        FIELD SELECTION IS A JUDGEMENT and this is the one thing about the
+        mechanism that can be wrong. `(id, name)` asserts a view is behind iff
+        its id/name set differs, so a rendered field absent from the
+        fingerprint goes stale. `name` is included because it is rendered and
+        changes rarely; connection state and temperature are excluded because
+        they reach the active view through `render_device` and including them
+        would re-seed on every reading.
+
+        The improvement over a dirty flag is not that this cannot be wrong --
+        it is that it fails on the **field** omitted, uniformly across views,
+        rather than on the **view** nobody marked dirty.
+        """
+
     def show(self) -> None:
         """Become visible. Reconciles rather than merely repainting, so a
         device set that moved while hidden cannot leave stale cards."""
