@@ -34,9 +34,22 @@ BROKEN_THRESHOLD = 3
 class ViewHost:
     """Owns which view is showing and what reaches it."""
 
-    def __init__(self, parent, ctx) -> None:
+    def __init__(self, parent, ctx, *, on_shown=None) -> None:
         self._parent = parent
         self._ctx = ctx
+        #: Called after every successful `show`, including the first.
+        #:
+        #: The shell owns the heading, the caption and the counts, and
+        #: composes all three from the **active** view -- so every path that
+        #: changes which view is active has to refresh them. Holding that
+        #: here rather than at the call sites is deliberate: it was held at a
+        #: call site once, and `385e718` -- the commit titled "fix the chrome
+        #: not following the view" -- fixed one of the two sites and left the
+        #: boot path at `_build_views` untouched, 70 lines from the docstring
+        #: explaining why the refresh "is not optional". A second call site
+        #: would be the same fix a third time, and the next one is added by
+        #: someone who has not read either docstring.
+        self._on_shown = on_shown or (lambda: None)
         self._factories: dict[str, Callable] = {}
         self._views: dict[str, object] = {}
         self._active_name: str | None = None
@@ -115,6 +128,14 @@ class ViewHost:
             self._call(name, "set_devices", devices)
             self._dirty.discard(name)
         self._call(name, "show")
+
+        # Deliberately NOT through `_call`. Containment exists because the
+        # pump delivers to views that are not active -- a faulty Dashboard
+        # must not freeze the List. This is the shell's own callback, so
+        # there is no foreign code to isolate, and the chrome path is the one
+        # that surfaced a missing attribute during slice 2 while the same
+        # fault inside containment was invisible. Keep it loud.
+        self._on_shown()
 
     def _hide_active(self) -> None:
         name = self._active_name

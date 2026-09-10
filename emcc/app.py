@@ -210,7 +210,8 @@ class App(ctk.CTk):
         does not move. Registration constructs nothing; the factory below runs
         inside `show`.
         """
-        self.views = ViewHost(self, StandaloneCtx(self))
+        self.views = ViewHost(self, StandaloneCtx(self),
+                              on_shown=self._refresh_chrome)
         self.views.register("list", self._make_list_view)
         self.views.register("dashboard", self._make_dashboard_view)
         self.views.show("list", self.manager.devices)
@@ -273,19 +274,12 @@ class App(ctk.CTk):
         one that went dirty while hidden -- is sent `set_devices` as part of
         `show`. This is the only place those two shapes meet.
 
-        **The chrome refresh is not optional.** The shell owns the heading,
-        the caption and the counts, and each of those is composed from the
-        *active view* -- so changing which view is active changes all three.
-        The host does not call back into the shell, and only `ListView`
-        reports movement via `on_changed`, so without this the sub-header
-        keeps the previous view's heading and caption after a switch. That is
-        exactly what shipped in the mount commit: the caption stayed
-        "3 devices configured - click Connect..." on the Dashboard, and 290
-        tests passed over it because nothing asserted the chrome follows the
-        view. See `test_the_chrome_follows_the_active_view`.
+        No chrome refresh here. It used to be, and that was the bug: the
+        refresh is an invariant of *showing a view*, so it now lives in
+        `ViewHost.show` where both this and the boot path inherit it. See the
+        `on_shown` note there for why holding it at a call site failed.
         """
         self.views.show(name, self.manager.devices)
-        self._refresh_chrome()
 
     # ------------------------------------------------------------------
     # Facade properties over the list view

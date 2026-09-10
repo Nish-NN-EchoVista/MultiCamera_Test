@@ -1507,3 +1507,92 @@ def test_the_heading_is_tracked_exactly_once(app):
     assert app.views.active.heading == "DEVICE CONTROLLERS", (
         "the view must return raw words, not a tracked string"
     )
+
+
+def test_the_host_refreshes_the_chrome_on_every_show():
+    """The invariant, pinned where it lives rather than where it is called.
+
+    `test_the_chrome_follows_the_active_view` covers the *switch* path and
+    structurally cannot cover the *boot* path -- it asserts the boot heading
+    is "DEVICE CONTROLLERS", which is what a missing boot refresh also
+    produces. So the boot site went unfixed by the commit titled "fix the
+    chrome not following the view", 70 lines from a docstring saying the
+    refresh was not optional.
+
+    Asserting on `ViewHost.show` instead covers every call site there is,
+    including ones nobody has written yet. Needs no Tk: the fake view is the
+    smallest thing the host will accept.
+
+    Dies on: dropping `self._on_shown()` from `ViewHost.show`.
+    """
+    from emcc.views.host import ViewHost
+
+    class _Widget:
+        def pack(self, **kwargs): pass
+        def pack_forget(self): pass
+
+    class _View:
+        def __init__(self, name):
+            self.name = name
+            self.widget = _Widget()
+            self.padding = {}
+        def set_devices(self, devices): pass
+        def show(self): pass
+        def hide(self): pass
+        def shutdown(self): pass
+
+    shown: list[int] = []
+    host = ViewHost(object(), None, on_shown=lambda: shown.append(1))
+    host.register("first", lambda parent, ctx: _View("first"))
+    host.register("second", lambda parent, ctx: _View("second"))
+
+    host.show("first", [])
+    assert shown == [1], "the FIRST show -- the boot path -- must refresh too"
+
+    host.show("second", [])
+    assert shown == [1, 1], "a switch must refresh"
+
+    host.show("first", [])
+    assert shown == [1, 1, 1], "switching back must refresh"
+
+
+def test_the_host_refresh_is_not_contained():
+    """A failing chrome refresh must propagate, not be swallowed.
+
+    `_call` contains view exceptions because the pump delivers to views that
+    are *not* active and a faulty Dashboard must not freeze the List. The
+    shell's own callback is not foreign code, and the chrome path is the one
+    that surfaced a missing `_hint_shown` during slice 2 while the identical
+    fault inside containment was invisible.
+
+    Dies on: routing `_on_shown` through `_call`.
+    """
+    from emcc.views.host import ViewHost
+
+    class _Widget:
+        def pack(self, **kwargs): pass
+        def pack_forget(self): pass
+
+    class _View:
+        name = "only"
+        def __init__(self):
+            self.widget = _Widget()
+            self.padding = {}
+        def set_devices(self, devices): pass
+        def show(self): pass
+        def hide(self): pass
+        def shutdown(self): pass
+
+    def explode():
+        raise RuntimeError("chrome refresh failed")
+
+    host = ViewHost(object(), None, on_shown=explode)
+    host.register("only", lambda parent, ctx: _View())
+
+    with pytest.raises(RuntimeError, match="chrome refresh failed"):
+        host.show("only", [])
+
+    assert host.incidents == (), (
+        "the failure was contained and recorded rather than raised -- the "
+        "chrome path must stay loud"
+    )
