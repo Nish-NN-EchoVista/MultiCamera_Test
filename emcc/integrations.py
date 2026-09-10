@@ -254,6 +254,68 @@ class Launch(NamedTuple):
     process: "subprocess.Popen | None" = None
 
 
+def _entry_candidates(root: Path, limit: int = 5) -> "list[Path]":
+    """Immediate subdirectories of `root` holding `PYGUI_ENTRY`.
+
+    For the one mistake the old message could not distinguish: pointing
+    `pygui_path` at the *parent* of the checkout instead of the checkout.
+    "PyGUI is missing app.py at: .../Github" is accurate and unhelpful --
+    the operator is looking at a folder, and `PyGUI/app.py` is one level down.
+
+    Only immediate children, and capped. A recursive walk of a mis-set path
+    could be the whole of `Documents`, and the mistake this addresses is
+    off-by-one-level rather than lost-entirely.
+
+    ALTERNATIVE ENTRY NAMES ARE NOT SEARCHED, deliberately. PyGUI's only
+    top-level module is `app.py` -- checked against the real checkout -- so a
+    candidate list of `main.py`, `run.py` and the rest would be built for a
+    layout that does not exist. `PYGUI_ENTRY` stays a single name until
+    something reports otherwise.
+
+    Never raises: `iterdir` on a mis-set path can fail on permissions, and a
+    hand-off must report rather than crash.
+    """
+    try:
+        children = sorted(root.iterdir())
+    except OSError:
+        return []
+
+    found: "list[Path]" = []
+    for child in children:
+        try:
+            if child.is_dir() and (child / PYGUI_ENTRY).is_file():
+                found.append(child)
+        except OSError:
+            continue
+        if len(found) >= limit:
+            break
+    return found
+
+
+def _missing_entry_message(root: Path) -> str:
+    """Operator-facing wording for `root` existing without `PYGUI_ENTRY`.
+
+    Lists candidates rather than picking one, and that is not caution:
+    `Documents/Github` has **two** children containing `app.py` -- `PyGUI` and
+    `PSU_Interface` -- so choosing would be wrong half the time on the very
+    directory this exists for.
+    """
+    candidates = _entry_candidates(root)
+    base = f"PyGUI is missing {PYGUI_ENTRY} at:\n{root}\n\n"
+
+    if not candidates:
+        return base + "Set 'pygui_path' in config.json to its folder."
+    if len(candidates) == 1:
+        return (base + f"It looks like one level up. {PYGUI_ENTRY} is in:\n"
+                f"{candidates[0]}\n\n"
+                "Set 'pygui_path' in config.json to that folder.")
+
+    listed = "\n".join(str(c) for c in candidates)
+    return (base + f"{len(candidates)} folders below it contain "
+            f"{PYGUI_ENTRY}:\n{listed}\n\n"
+            "Set 'pygui_path' in config.json to the right one.")
+
+
 def launch_pygui(ip: str, pygui_path: str) -> Launch:
     """Launch PyGUI pointed at `ip`.
 
@@ -271,8 +333,7 @@ def launch_pygui(ip: str, pygui_path: str) -> Launch:
         return Launch(f"PyGUI was not found at:\n{root}\n\n"
                       "Set 'pygui_path' in config.json to its folder.")
     if not entry.is_file():
-        return Launch(f"PyGUI is missing {PYGUI_ENTRY} at:\n{root}\n\n"
-                      "Set 'pygui_path' in config.json to its folder.")
+        return Launch(_missing_entry_message(root))
 
     handoff = os.environ.copy()
     handoff[ENV_HANDOFF_IP] = ip

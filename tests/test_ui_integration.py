@@ -932,6 +932,96 @@ def test_a_pygui_that_exits_before_it_is_ready_is_reported_at_once(code, expecte
     assert not stub._splash.closed, "a failed launch must not read as success"
 
 
+def test_a_pygui_path_one_level_too_high_names_where_the_entry_is(tmp_path):
+    """The mistake the old message could not distinguish.
+
+    "PyGUI is missing app.py at: .../Github" is accurate and unhelpful: the
+    operator is looking at a folder, and `PyGUI/app.py` is one level down. So
+    it now names where the entry actually is.
+
+    Dies on: dropping the candidate scan, or reporting the parent instead of
+    the child.
+    """
+    from emcc.integrations import launch_pygui
+
+    (tmp_path / "PyGUI").mkdir()
+    (tmp_path / "PyGUI" / "app.py").write_text("x", encoding="utf-8")
+
+    error = launch_pygui("10.0.0.1", str(tmp_path)).error
+
+    assert error is not None
+    assert "one level up" in error, error
+    assert str(tmp_path / "PyGUI") in error, error
+
+
+def test_several_candidate_folders_are_listed_rather_than_chosen(tmp_path):
+    """Listing is not caution -- choosing would be wrong half the time.
+
+    The directory this feature exists for is the real
+    `Documents/Github`, and **two** of its children contain `app.py`:
+    `PyGUI` and `PSU_Interface`. A discovery that picked the first match
+    would send the operator to the wrong application on the one path that
+    motivated it.
+
+    Dies on: returning only the first candidate, or wording the multiple case
+    as though one had been identified.
+    """
+    from emcc.integrations import launch_pygui
+
+    for name in ("PyGUI", "PSU_Interface"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "app.py").write_text("x", encoding="utf-8")
+
+    error = launch_pygui("10.0.0.1", str(tmp_path)).error
+
+    assert error is not None
+    assert "2 folders" in error, error
+    assert str(tmp_path / "PyGUI") in error, error
+    assert str(tmp_path / "PSU_Interface") in error, error
+    assert "one level up" not in error, (
+        "the multiple case must not claim a single answer"
+    )
+
+
+def test_a_root_with_no_entry_below_it_keeps_the_plain_message(tmp_path):
+    """The control: no candidates must not invent one.
+
+    Without this, "name the candidate" and "always claim a candidate" are the
+    same test.
+
+    Dies on: emitting the one-level-up wording unconditionally.
+    """
+    from emcc.integrations import launch_pygui
+
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "empty").mkdir()
+
+    error = launch_pygui("10.0.0.1", str(tmp_path)).error
+
+    assert error is not None
+    assert "is missing app.py" in error, error
+    assert "one level up" not in error, error
+    assert "folders below it" not in error, error
+
+
+def test_candidate_discovery_survives_an_unreadable_root(tmp_path, monkeypatch):
+    """`iterdir` can fail on a mis-set path; a hand-off must report, not crash.
+
+    Dies on: letting the OSError out of `_entry_candidates`.
+    """
+    from emcc import integrations
+
+    def boom(_self):
+        raise PermissionError("nope")
+
+    monkeypatch.setattr(pathlib.Path, "iterdir", boom)
+
+    error = integrations.launch_pygui("10.0.0.1", str(tmp_path)).error
+
+    assert error is not None
+    assert "is missing app.py" in error, error
+
+
 def test_a_live_pygui_is_not_reported_as_exited():
     """The other half: `poll()` returning None must not fail the splash.
 
