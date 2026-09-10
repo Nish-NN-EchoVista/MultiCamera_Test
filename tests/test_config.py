@@ -380,6 +380,62 @@ def test_a_failed_quarantine_reaches_the_operator(config_path, monkeypatch):
     assert "unreadable" in str(seen[0]) and str(config_path) in str(seen[0])
 
 
+def test_the_operator_is_told_only_once_the_failure_is_persistent(
+        config_path, monkeypatch):
+    """The escalation gate: the 3rd and 30th consecutive failure, not the 1st.
+
+    `save_now` escalates to `_notify_save_error` only when
+    `_save_failures in (3, 30)` -- "only escalate once it is clearly
+    persistent". Nothing asserted that tuple. Both F12 tests call
+    `_notify_save_error` directly, which is the right level for asserting the
+    WIRING but means neither reaches the gate that decides whether the wiring
+    is ever used.
+
+    Recorded as a deliberate answer to a question the Manager left open --
+    does the gate want a test, or is calling directly the right level? Both:
+    the wiring tests bypass it on purpose, and the gate is a separate product
+    decision with its own pin. An unasserted magic tuple is the same shape as
+    `ConnectionState.is_live`'s unpinned membership, which changed behaviour
+    at three call sites with a green suite.
+
+    The single transient failure staying silent is the load-bearing half. A
+    dialog on every hiccup during a debounced save burst would train the
+    operator to dismiss it, which is how a real fault gets dismissed too.
+
+    Dies on: changing either number, escalating on every failure, or
+    escalating only once.
+    """
+    manager = ConfigManager(config_path)
+    manager.load()
+    seen = []
+    manager.on_save_error = seen.append
+
+    monkeypatch.setattr(
+        "emcc.backend.config_manager.tempfile.mkstemp",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    for attempt in range(1, 31):
+        assert manager.save_now() is False, f"save {attempt} unexpectedly succeeded"
+        if attempt < 3:
+            assert seen == [], f"escalated on failure {attempt}, before persistent"
+        elif attempt < 30:
+            assert len(seen) == 1, (
+                f"after failure {attempt} the operator has been told "
+                f"{len(seen)} times, expected exactly 1"
+            )
+        else:
+            assert len(seen) == 2, (
+                f"the 30th failure did not re-escalate: told {len(seen)} times"
+            )
+
+    assert manager.save_now() is False
+    assert len(seen) == 2, "escalated again after the 30th"
+    assert all(isinstance(exc, OSError) for exc in seen), (
+        f"the operator was handed something other than the cause: {seen}"
+    )
+
+
 def test_a_save_error_with_no_operator_sink_is_logged(config_path, caplog):
     """An empty `on_save_error` must be recorded, not returned from silently.
 
