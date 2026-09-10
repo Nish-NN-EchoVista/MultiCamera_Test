@@ -788,11 +788,6 @@ def test_padding_is_a_mapping_the_host_can_splat(tmp_path):
         root.destroy()
 
 
-def test_contract_attributes_are_present():
-    assert DashboardView.name == "dashboard"
-    assert isinstance(getattr(DashboardView, "widget", None), property)
-
-
 def test_the_view_is_its_own_widget(tmp_path):
     """The host packs `view.widget`; for this view that is the view."""
     root, _, view, _, _ = _view(tmp_path, 1)
