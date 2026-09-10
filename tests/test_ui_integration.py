@@ -808,45 +808,55 @@ def test_scenario_j_shutdown_closes_everything(app, tmp_path):
             mock.stop()
 
 
-def test_a_config_save_error_reaches_the_operator_dialog(app, monkeypatch):
+def test_a_config_save_error_reaches_the_operator_dialog(app):
     """F12: the whole notification path rests on one unguarded assignment.
 
-    `App.__init__` wires `ConfigManager.on_save_error` to
-    `_on_config_save_error` in a single line. Measured: delete that line and
-    **109 tests still pass** -- the whole of `test_config.py` and
-    `test_ui_integration.py` -- because
+    `App.__init__` wires `ConfigManager.on_save_error` to the shell's handler
+    in a single line. Measured: delete that line and **109 tests still pass**
+    -- the whole of `test_config.py` and `test_ui_integration.py` -- because
     `test_a_failed_quarantine_reaches_the_operator` installs its OWN callback.
     That test proves `ConfigManager` calls whatever occupies the slot; nothing
     proved anything fills it.
 
-    Asserts DELIVERY, not identity. Comparing
-    `config_manager.on_save_error == app._on_config_save_error` would pass on
-    a wiring to the wrong callable, and the property that matters is that a
-    save failure reaches an operator-facing dialog.
+    Asserts DELIVERY, not identity. Comparing the attribute against the bound
+    handler would pass on a wiring to the wrong callable, and the property that
+    matters is that a save failure reaches an operator-facing dialog -- so this
+    looks for the dialog itself.
 
     The slot cannot simply be made non-emptiable, which is what the finding
-    suggested: a headless `ConfigManager` -- the tools, most of `tests/` --
-    has no operator, so `None` is a legitimate state for the type. What was
-    missing is that the APP path could leave it empty undetectably. So this
-    pins the app's wiring, and `_notify_save_error` now logs when the sink is
-    empty instead of returning silently.
+    suggested: a headless `ConfigManager` -- the tools, most of `tests/` -- has
+    no operator, so `None` is a legitimate state for the type. What was missing
+    is that the APP path could leave it empty undetectably. So this pins the
+    app's wiring, and `_notify_save_error` now logs when the sink is empty
+    instead of returning silently.
+
+    REACHES NOTHING PRIVATE ON `App`, and that is load-bearing rather than
+    tidiness. The first version monkeypatched the shell's error reporter, which
+    put that attribute into the facade scanner's reached set and failed
+    `test_facade_covers_every_name_reached_from_outside`. The scanner was right
+    and the fix was to stop reaching a private attribute from outside -- not to
+    declare it part of the facade contract so that a new test could pass. A
+    guard that is widened to accommodate the thing it caught stops being a
+    guard.
 
     Dies on: deleting the wiring line in `App.__init__`.
     """
-    shown = []
-    monkeypatch.setattr(app._errors, "show_now",
-                        lambda *args: shown.append(args))
-
     app.config_manager._notify_save_error(OSError("disk full"))
-    _pump(app, 2)
+    _pump(app, 6)
 
-    assert shown, (
+    dialogs = [c for c in app.winfo_children() if isinstance(c, ctk.CTkToplevel)]
+    assert dialogs, (
         "a config save error reached no operator-facing dialog: the "
         "on_save_error wiring in App.__init__ is missing"
     )
-    assert "disk full" in " ".join(str(part) for part in shown[0]), (
-        f"the dialog did not carry the cause: {shown[0]}"
-    )
+    try:
+        body = "\n".join(_label_texts(dialogs[-1]))
+    finally:
+        dialogs[-1].destroy()
+        _pump(app, 2)
+
+    assert "disk full" in body, f"the dialog did not carry the cause: {body!r}"
+    assert "Configuration" in body, f"not the config error dialog: {body!r}"
 
 
 def test_shutdown_is_idempotent(app):
