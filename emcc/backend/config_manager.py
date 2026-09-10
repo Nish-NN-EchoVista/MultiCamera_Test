@@ -367,6 +367,25 @@ class ConfigManager:
         configures a file handler, and the operator is not reading stderr.
         """
         if self.on_save_error is None:
+            # Recorded rather than dropped. A headless `ConfigManager` -- the
+            # tools, most of `tests/` -- legitimately has no operator to tell,
+            # so an empty sink is not an error in itself. In the application it
+            # means the wiring in `App.__init__` is missing and the operator is
+            # being told nothing at all, which is the F12 failure.
+            #
+            # WARNING **without** `exc_info`, deliberately: `conftest`'s
+            # containment fixture keys on WARNING-or-above *carrying* exception
+            # info, and this is a missing sink rather than a swallowed
+            # exception. Measured -- attaching `exc_info` makes that fixture
+            # error on every test that provokes an empty-sink notification.
+            #
+            # An earlier version of this comment named
+            # `test_existing_config_is_intact_after_failed_save` as the one it
+            # would break. Wrong, and checked only after writing it: that test
+            # calls `save_now()` ONCE, and the caller above escalates only at
+            # `_save_failures in (3, 30)`, so it never reaches this line. The
+            # test actually affected is the one asserting this behaviour.
+            logger.warning("config: save error with no operator sink: %s", exc)
             return
         try:
             self.on_save_error(exc)

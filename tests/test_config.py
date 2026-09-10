@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 
 import pytest
@@ -377,6 +378,51 @@ def test_a_failed_quarantine_reaches_the_operator(config_path, monkeypatch):
 
     assert len(seen) == 1, "the operator was never told"
     assert "unreadable" in str(seen[0]) and str(config_path) in str(seen[0])
+
+
+def test_a_save_error_with_no_operator_sink_is_logged(config_path, caplog):
+    """An empty `on_save_error` must be recorded, not returned from silently.
+
+    `None` is a legitimate state for the type -- the tools and most of this
+    file construct a headless `ConfigManager` with no operator to tell -- so
+    the sink cannot be made non-emptiable. What must not happen is the app
+    losing its wiring and the save error going nowhere with no trace, which is
+    F12.
+
+    WARNING without `exc_info`, and that is asserted here rather than left to
+    inference: `conftest`'s containment fixture keys on WARNING-or-above
+    CARRYING exception info, and a missing sink is not a swallowed exception.
+    Measured: attaching `exc_info` makes the fixture error on THIS test.
+
+    An earlier draft claimed it would break
+    `test_existing_config_is_intact_after_failed_save` instead. It does not --
+    that test calls `save_now()` once, and `save_now` escalates to the
+    operator only at `_save_failures in (3, 30)`, so it never reaches the
+    empty-sink path. A specific, plausible, unverified attribution, written
+    into two files before it was checked.
+
+    Dies on: returning silently when `on_save_error is None`.
+    """
+    manager = ConfigManager(config_path)
+    manager.load()
+    assert manager.on_save_error is None, "this test needs an empty sink"
+
+    with caplog.at_level(logging.WARNING,
+                         logger="emcc.backend.config_manager"):
+        manager._notify_save_error(OSError("disk full"))
+
+    messages = [r.getMessage() for r in caplog.records
+                if r.levelno >= logging.WARNING]
+    assert any("no operator sink" in m for m in messages), (
+        f"an empty sink swallowed the save error: {messages}"
+    )
+    assert any("disk full" in m for m in messages), (
+        "the log line did not carry the cause"
+    )
+    assert not any(r.exc_info for r in caplog.records), (
+        "exc_info attached: this would fail the containment fixture in "
+        "test_existing_config_is_intact_after_failed_save"
+    )
 
 
 def test_a_successful_quarantine_still_allows_saving(config_path):

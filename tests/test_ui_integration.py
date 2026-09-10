@@ -808,6 +808,47 @@ def test_scenario_j_shutdown_closes_everything(app, tmp_path):
             mock.stop()
 
 
+def test_a_config_save_error_reaches_the_operator_dialog(app, monkeypatch):
+    """F12: the whole notification path rests on one unguarded assignment.
+
+    `App.__init__` wires `ConfigManager.on_save_error` to
+    `_on_config_save_error` in a single line. Measured: delete that line and
+    **109 tests still pass** -- the whole of `test_config.py` and
+    `test_ui_integration.py` -- because
+    `test_a_failed_quarantine_reaches_the_operator` installs its OWN callback.
+    That test proves `ConfigManager` calls whatever occupies the slot; nothing
+    proved anything fills it.
+
+    Asserts DELIVERY, not identity. Comparing
+    `config_manager.on_save_error == app._on_config_save_error` would pass on
+    a wiring to the wrong callable, and the property that matters is that a
+    save failure reaches an operator-facing dialog.
+
+    The slot cannot simply be made non-emptiable, which is what the finding
+    suggested: a headless `ConfigManager` -- the tools, most of `tests/` --
+    has no operator, so `None` is a legitimate state for the type. What was
+    missing is that the APP path could leave it empty undetectably. So this
+    pins the app's wiring, and `_notify_save_error` now logs when the sink is
+    empty instead of returning silently.
+
+    Dies on: deleting the wiring line in `App.__init__`.
+    """
+    shown = []
+    monkeypatch.setattr(app._errors, "show_now",
+                        lambda *args: shown.append(args))
+
+    app.config_manager._notify_save_error(OSError("disk full"))
+    _pump(app, 2)
+
+    assert shown, (
+        "a config save error reached no operator-facing dialog: the "
+        "on_save_error wiring in App.__init__ is missing"
+    )
+    assert "disk full" in " ".join(str(part) for part in shown[0]), (
+        f"the dialog did not carry the cause: {shown[0]}"
+    )
+
+
 def test_shutdown_is_idempotent(app):
     app.shutdown()
     app.shutdown()      # must not raise
