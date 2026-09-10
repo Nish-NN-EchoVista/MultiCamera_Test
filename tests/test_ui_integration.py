@@ -385,6 +385,29 @@ def test_scenario_e_timeout_returns_clean_to_blue(app):
     and, separately, removing its `_notify_ui(device_id)` call -- that one is
     caught only by the colour and tick assertions, because the flag would
     clear without the card ever repainting.
+
+    AND THIS TEST IS THE SOLE GUARD ON THE `on_device_changed` WIRING.
+    `App.__init__` connects `DeviceManager.on_device_changed` to
+    `_on_device_changed` in one line, and `on_device_changed` has zero
+    references anywhere in `tests/` -- so nothing names it and only this
+    test's repaint assertions notice if the line goes.
+
+    Measured, not asserted: the wiring deleted, full suite in a `git archive`
+    of 34f1899, **1 failed of 323 and it was this test**. "Sole" is a claim
+    about every test, so it was checked against every test -- an earlier
+    matrix in this file said "only" from a run scoped to two.
+
+    Which makes this test load-bearing well beyond its name. It reads as a
+    Clean-timeout scenario; it is also the only thing standing between a
+    deleted callback assignment and a UI that silently stops repainting on
+    every device event. Do not narrow its assertions to "the flag cleared"
+    on the grounds that the colour and tick checks are redundant -- those are
+    the half that catches the wiring.
+
+    The structural fix is the empty-slot family, queued: a slot filled by
+    exactly one assignment with the filling untested, the same shape as
+    `on_save_error` before F12. Until that lands, this docstring is the only
+    place the coupling is written down.
     """
     with MockNPort(MockConfig(clean_duration_s=99)) as mock:
         device = _connect(app, mock)
