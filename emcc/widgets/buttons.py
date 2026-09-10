@@ -47,12 +47,9 @@ class ConnectionButton(ctk.CTkFrame):
             font-semibold rounded-lg px-3 py-2
     """
 
-    def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
-                 pulse):
+    def __init__(self, master, device: DeviceState, on_click: Callable[[], None]):
         super().__init__(master, fg_color="transparent")
         self._device = device
-        self._pulse = pulse
-        self._pulse_token: int | None = None
         self._hovered = False
         self._style = ""
 
@@ -104,34 +101,14 @@ class ConnectionButton(ctk.CTkFrame):
         self._label.configure(text=visual.label, text_color=colours["text"])
         self._caption.configure(text=visual.caption,
                                 text_color=colours["caption_color"])
-        self._repulse(colours, visual.pulse)
+        self._dot.configure(fg_color=colours["dot"])
         self._style = visual.style
-
-    def _repulse(self, colours: dict, pulse: bool) -> None:
-        """Re-key the pulse to the current button fill.
-
-        The dot reads as translucent against the button and that fill changes
-        on hover, so its precomputed shades must be rebuilt for the new
-        backdrop.
-        """
-        if self._pulse_token is not None:
-            self._pulse.unregister(self._pulse_token)
-            self._pulse_token = None
-        backdrop = colours["bg_hover"] if self._hovered else colours["bg"]
-        if pulse:
-            self._pulse_token = self._pulse.register(self._dot, colours["dot"],
-                                                     backdrop)
-        else:
-            self._dot.configure(fg_color=colours["dot"])
 
     def render(self) -> None:
         self._paint()
         self._interactive.refresh()
 
-    def destroy(self) -> None:
-        if self._pulse_token is not None:
-            self._pulse.unregister(self._pulse_token)
-        super().destroy()
+
 
 
 class CleanButton(ctk.CTkFrame):

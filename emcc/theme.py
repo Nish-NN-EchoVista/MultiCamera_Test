@@ -33,7 +33,13 @@ def over(fg: str, bg: str, alpha: float) -> str:
 
 
 def mix(a: str, b: str, t: float) -> str:
-    """Linear blend; t=0 -> a, t=1 -> b. Used by the pulse animation."""
+    """Linear blend; t=0 -> a, t=1 -> b.
+
+    NOTE: no callers. Its one documented consumer was the status pulse,
+    removed 2026-09-10. Kept rather than deleted because removing a
+    public helper is a wider call than this change; flagged for the
+    dead-code pass.
+    """
     return over(b, a, t)
 
 
@@ -190,7 +196,6 @@ CONN = {
         "dot": BLUE_300,
         "text": WHITE,
         "caption_color": TEXT_GHOST,
-        "pulse": True,
     },
     "connected": {
         "bg": EMERALD_700,
@@ -199,7 +204,6 @@ CONN = {
         "dot": EMERALD_300,
         "text": WHITE,
         "caption_color": over(EMERALD_500, CARD, 0.60),
-        "pulse": True,
     },
     "fault": {
         "bg": RED_700,
@@ -208,7 +212,6 @@ CONN = {
         "dot": RED_300,
         "text": WHITE,
         "caption_color": over(RED_500, CARD, 0.70),
-        "pulse": False,
     },
 }
 
@@ -430,9 +433,12 @@ DASH_TEMP_H = 34         # the inset temperature panel
 #   header 28 + temp 34 + actions 27 + padding 16 + gaps 6 = 111
 DASH_CTRL_PAD = (10, 5)
 
-#: Status dot on a dashboard card. Smaller than the list view's 8px, and it
-#: does not pulse: 25 pulsing dots is 25 colour tweens on the same timer, and
-#: at this density the dot reads as a legend key rather than a live indicator.
+#: Status dot on a dashboard card. Smaller than the list view's 8px.
+#
+# It never pulsed, when the list view still did, because at this density a
+# dot reads as a legend key rather than a live indicator. The status pulse
+# was removed everywhere on 2026-09-10, so the asymmetry is gone -- kept as
+# a note only because the size difference outlived the reason for it.
 DASH_DOT = 6
 
 #: The List view sub-header heading. Raw words -- `SubHeader` applies the

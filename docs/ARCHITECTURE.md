@@ -52,7 +52,7 @@ main.py                       entrypoint: logging → config → UI
     ├── theme.py              design tokens (flattened translucency)
     ├── fonts.py              family resolution, px sizes, tracking
     ├── icons.py              inline SVGs redrawn with Pillow
-    ├── anim.py               shared pulse ticker, tween
+    ├── anim.py               tween (eased one-shot motions)
     ├── integrations.py       temperature → PyGUI hand-off
     ├── splash.py             launch splash (Windows layered window)
     └── widgets/

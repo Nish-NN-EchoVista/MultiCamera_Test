@@ -124,12 +124,13 @@ def capture_stable(widget, *, attempts: int = 14, settle_s: float = 0.06,
     drains long before Windows has composited the child widget, so the only
     honest test is whether two successive frames agree.
 
-    Not usable on a window containing an *endless* animation: `emcc.anim.Pulse`
-    ticks at 30fps, so two frames never agree while it runs -- call
-    `Pulse.freeze()` first, which is what `tools/visual_pass.py` does. A
-    *transient* animation is different and is simply waited out: the toggle
-    knob's 200ms slide settles on its own, which is why the attempt budget is
-    generous rather than the animation being frozen.
+    Not usable on a window containing an *endless* animation: two frames
+    never agree while one runs. The app had one until 2026-09-10 -- a 30fps
+    status pulse, which `tools/visual_pass.py` had to freeze before capturing
+    -- and has none now, so this is usable on the main window unconditionally.
+    A *transient* animation was always fine and is simply waited out: the
+    toggle knob's 200ms slide settles on its own, which is why the attempt
+    budget is generous rather than the animation being frozen.
     """
     previous = None
     for _ in range(attempts):

@@ -134,7 +134,6 @@ class DeviceCard(ctk.CTkFrame):
         on_remove: Callable[[str], None],
         on_rename: Callable[[str, str], None],
         on_ip_change: Callable[[str, str], None],
-        pulse,
         label_offset: float | None = None,
     ):
         super().__init__(
@@ -148,7 +147,6 @@ class DeviceCard(ctk.CTkFrame):
         self.pack_propagate(False)
 
         self.device = device
-        self._pulse = pulse
         self._label_offset = label_offset
         self._sections: list[_Section] = []
 
@@ -327,7 +325,7 @@ class DeviceCard(ctk.CTkFrame):
 
         self._connection = ConnectionButton(
             section.body, self.device,
-            lambda: self._on_connect(self.device_id), self._pulse,
+            lambda: self._on_connect(self.device_id),
         )
         self._connection.pack(fill="x", padx=16)  # inner px-4
 

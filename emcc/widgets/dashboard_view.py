@@ -14,9 +14,12 @@ Two deliberate departures from `DeviceCard`, both about density:
   alignment maths describing a card that no longer exists. Its five fixed
   columns plus separators also put a ~700px floor on width, and a 5-column
   grid at 1280px gives each cell ~232px.
-* **No pulsing status dot.** 25 cards would mean 25 tweens on the shared
-  `Pulse` timer. At this density the dot reads as a state key, not as a live
-  indicator, so it is painted once per render.
+* **A static status dot.** It never pulsed: 25 cards would have meant 25
+  tweens on the shared timer, and at this density a dot reads as a state key
+  rather than a live indicator. The status pulse was removed from the whole
+  app on 2026-09-10, so this is no longer a departure from `DeviceCard` --
+  kept in the list because it explains why the dot is painted once per
+  render.
 
 `CleanButton` and `AutoButton` are reused as-is apart from their padding: they
 read `DeviceState` live and hold no state of their own, so the only thing they
@@ -722,11 +725,12 @@ class DashboardView(ctk.CTkFrame):
         """Called by the host before unmapping this view.
 
         Releases the streamed build. Per the view contract, anything on a
-        timer stops when a view goes off screen -- the Dashboard has no
-        animation to release (it registers no `Pulse` token, deliberately;
-        see the class docstring), but a build in progress is the same kind of
-        waste: cards constructed at ~70ms each for a grid nobody is looking
-        at, competing with whichever view *is* on screen.
+        timer stops when a view goes off screen. The Dashboard has no
+        animation to release -- the status pulse was removed app-wide on
+        2026-09-10, and this view never had one -- but a build in progress
+        is the same kind of waste: each card costs tens of milliseconds to
+        construct, spent on a grid nobody is looking at and competing with
+        whichever view *is* on screen.
 
         `_pending` is left alone. `show()` calls `sync()`, which recomputes
         the queue from `_devices` and re-schedules, so an interrupted build

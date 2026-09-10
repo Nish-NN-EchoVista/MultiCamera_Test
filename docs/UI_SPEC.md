@@ -136,9 +136,8 @@ downscaled, cached by `(name, colour, size)`:
 
 | Design | Implementation |
 |---|---|
-| `status-pulse` — 2s ease-in-out, opacity 1→0.45→1, infinite | `anim.Pulse`: one shared 30fps ticker for every dot, so they stay in phase and cost does not scale with device count. Per-dot frame colours precomputed on registration. |
 | Auto toggle knob, `transition-all duration-200` | `anim.Tween`, 200ms eased, knob slides x=2→14 |
-| `transition-colors duration-200` on hover | applied instantly — easing every colour channel of every widget is not worth the cost |
+| `transition-colors duration-200` on hover | applied instantly; hover changes colour in one step, with no interpolation |
 
 Easing is smoothstep (`3t²−2t³`), visually indistinguishable from CSS
 `ease-in-out` at these durations.

@@ -952,46 +952,6 @@ def test_missing_logo_asset_does_not_break_startup(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_pulse_freeze_is_not_undone_by_a_new_card(app):
-    """Freezing must be a mode, not an event.
-
-    `stop_all()` stops the ticker but not its restarting: every `DeviceCard`
-    builds a `ConnectionButton` that registers a dot, and `register` calls
-    `_start`. So a capture pass that adds devices would freeze, appear to
-    work, and be animating again by the state with the most dots -- failing
-    silently on exactly the capture that needs it most.
-
-    Dies on: making `freeze()` a one-shot (dropping the `_frozen` flag, or
-    removing its check from `register`/`_start`).
-    """
-    app.pulse.freeze()
-    _pump(app, 4)
-    assert app.pulse._job is None, "ticker still scheduled after freeze"
-    before = len(app.pulse._targets)
-
-    app._add_device()
-    _pump(app, 8)
-
-    assert len(app.pulse._targets) > before, "the new card did not register"
-    assert app.pulse._job is None, "a newly registered dot restarted the ticker"
-
-
-def test_pulse_freeze_holds_a_defined_phase(app):
-    """Frame 0, not "wherever it stopped".
-
-    Freezing at the current frame leaves a colour depending on *when* freeze
-    was called, which is not reproducible between runs -- it would move the
-    capture noise rather than remove it.
-
-    Dies on: freezing without repainting, or repainting at `self._frame`.
-    """
-    app.pulse.freeze()
-    _pump(app, 4)
-    for widget, shades in app.pulse._targets.values():
-        if widget.winfo_exists():
-            assert widget.cget("fg_color") == shades[0]
-
-
 def test_scroll_hint_text_tracks_the_device_count(app):
     """Dies on: replacing the f-string with a fixed string, or dropping the
     `self._hint.configure(...)` call from `_refresh_chrome`."""

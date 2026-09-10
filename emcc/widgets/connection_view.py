@@ -25,9 +25,6 @@ class ConnectionVisual:
     style: str          # key into theme.CONN
     label: str
     caption: str
-    #: The dot pulses while something is in progress or healthy, and holds
-    #: steady when the device needs attention.
-    pulse: bool
 
 
 def connection_visual(
@@ -46,10 +43,10 @@ def connection_visual(
     reverting would make a broken device look identical to an idle one.
     """
     if state is ConnectionState.CONNECTED:
-        return ConnectionVisual("connected", "Connected", "Stream active", True)
+        return ConnectionVisual("connected", "Connected", "Stream active")
 
     if state is ConnectionState.CONNECTING:
-        return ConnectionVisual("idle", "Connecting…", "Opening connection", True)
+        return ConnectionVisual("idle", "Connecting…", "Opening connection")
 
     if state is ConnectionState.RECONNECTING:
         caption = (
@@ -57,19 +54,19 @@ def connection_visual(
             if attempt and total_attempts
             else "Reconnecting…"
         )
-        return ConnectionVisual("fault", "Reconnecting…", caption, True)
+        return ConnectionVisual("fault", "Reconnecting…", caption)
 
     if state is ConnectionState.ERROR:
         # `error` is already short, operator-facing text from the worker.
-        return ConnectionVisual("fault", "Reconnect", error or "Connection failed",
-                                False)
+        return ConnectionVisual("fault", "Reconnect",
+                                error or "Connection failed")
 
     if state is ConnectionState.STOPPING:
-        return ConnectionVisual("idle", "Connect", "Stopping…", False)
+        return ConnectionVisual("idle", "Connect", "Stopping…")
 
     # DISCONNECTED: never connected, or the operator asked for it.
     caption = "Not connected" if has_ip else "No IP address set"
-    return ConnectionVisual("idle", "Connect", caption, True)
+    return ConnectionVisual("idle", "Connect", caption)
 
 
 def palette(style: str) -> dict:

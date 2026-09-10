@@ -119,13 +119,14 @@ def grab(name, widget=None, pad=0):
     pump(10)
     try:
         if isinstance(widget, ctk.CTkToplevel):
-            # Freshly mapped, and carries no pulse: require a settled frame.
-            # `capture` alone would accept a half-painted dialog, which is how
+            # Freshly mapped: require a settled frame. `capture` alone
+            # would accept a half-painted dialog, which is how
             # 08_error_dialog came back with an unrendered button label.
             image = _with_margin(capture_stable(widget), pad)
         elif widget is None:
-            # Settled-frame check, available here only because the pulse is
-            # frozen -- a tweening dot never lets two frames agree.
+            # Settled-frame check. Available unconditionally since the
+            # status pulse was removed; it used to need the freeze below,
+            # because a tweening dot never lets two frames agree.
             image = _with_margin(capture_stable(app), pad)
         else:
             image = capture_widget(widget, pad)
@@ -156,22 +157,16 @@ results = []
 
 
 def run():
-    # Freeze the pulse before the first capture.
+    # No freeze step any more: the status pulse was removed on 2026-09-10,
+    # so nothing here animates endlessly and every whole-window state gets
+    # `capture_stable` -- the two-frames-agree check -- without preparation.
     #
-    # Two purposes, and the second is the bigger one. It makes an image diff
-    # exact -- two captures of the same idle window otherwise differ by ~1216
-    # of 5.8M pixels, all of it the connection dots tweening. And it is what
-    # lets whole-window states use `capture_stable`: that accepts a frame only
-    # once two agree, which a pulsing window can never satisfy, so without the
-    # freeze ten of twelve states would keep the blank-only check that proved
-    # blind to partial rendering.
-    #
-    # A mode rather than a one-shot: state 10 adds six devices, each
-    # registering a new dot, which would restart the ticker. See Pulse.freeze.
-    #
-    # `run()` is invoked via after(1500, ...), so the window has painted --
-    # frame 0 on an unsettled window would not be deterministic.
-    app.pulse.freeze()
+    # What the freeze bought, for the record: two captures of the same idle
+    # window differed by ~1216 of 5.8M pixels with the pulse running and by
+    # zero with it stopped, and without it ten of twelve states fell back to
+    # the blank-only check, which proved blind to partial rendering. Both
+    # properties now hold by construction rather than by a call that could be
+    # forgotten.
     pump(4)
 
     # No periodic temperature stream and no self-completing sweep: every

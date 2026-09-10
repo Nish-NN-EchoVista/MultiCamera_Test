@@ -31,7 +31,6 @@ import customtkinter as ctk
 
 from . import fonts, icons, theme
 from . import splash as splash_module
-from .anim import Pulse
 from .backend.config_manager import ConfigManager
 from .backend.device_manager import DeviceManager, DeviceState
 from .backend.logging_setup import shutdown_logging
@@ -67,7 +66,7 @@ _FACADE_NAMES: frozenset[str] = frozenset({
     "_list", "_logo", "_order", "_pending_devices", "_pump",
     "_refresh_chrome", "_remove_device", "_render_device",
     "_scroll_to_end", "_shutting_down", "_toggle_auto",
-    "config_manager", "manager", "pulse", "shutdown", "title_bar",
+    "config_manager", "manager", "shutdown", "title_bar",
     # Added by the Dashboard mount. `views` is the host, `_sub` the
     # sub-header builder, `_switch_view` the toggle's adapter -- all three
     # are reached from `tests/` now, so the same obligation applies to them
@@ -99,7 +98,6 @@ class App(ctk.CTk):
         icons.clear_cache()
         fonts.clear_cache()
         fonts.init()
-        self.pulse = Pulse(self)
 
         self.config_manager = config or ConfigManager()
         if config is None:
@@ -137,7 +135,7 @@ class App(ctk.CTk):
         self._strip_caption()
 
         self.title_bar = TitleBar(
-            self, self.pulse,
+            self,
             on_close=self.shutdown,
             on_minimise=self._minimise,
             on_maximise=self._toggle_maximise,
@@ -228,7 +226,6 @@ class App(ctk.CTk):
         self._list_view = ListView(
             parent, ctx,
             manager=self.manager,
-            pulse=self.pulse,
             offsets=self._offsets,
             devices=self.manager.devices,
             on_add=self._add_device,
@@ -373,12 +370,12 @@ class App(ctk.CTk):
         **The message names two causes rather than asserting one.** An earlier
         version said the name was *"most likely lost during the
         modularisation"*, which is a diagnosis where the evidence only
-        supports an observation. Absence has a second cause: 22 of the 27
-        facade names are plain attributes and **nine are assigned during
-        construction** -- `pulse` at :102 through `views` at :213 -- so any of
-        them read before its own assignment line lands here too. Blaming the
-        modularisation for that sends the reader looking for a deleted
-        attribute when the fault is ordering.
+        supports an observation. Absence has a second cause: 21 of the 26
+        facade names are plain attributes and **eight are assigned during
+        construction** -- `config_manager` at :102 through `views` at :211 --
+        so any of them read before its own assignment line lands here too.
+        Blaming the modularisation for that sends the reader looking for a
+        deleted attribute when the fault is ordering.
 
         Ordering first, because it is the likelier of the two: a lost facade
         name fails loudly in the completeness test, whereas an ordering bug
@@ -631,12 +628,13 @@ class App(ctk.CTk):
                 except Exception:
                     pass
 
-        # 5. stop animations, then tear down Tk
-        try:
-            self.pulse.stop_all()
-        except Exception:
-            pass
-
+        # 5. tear down Tk
+        #
+        # Nothing to stop first any more. The status pulse was removed on
+        # 2026-09-10, and the toggle knob's `Tween` is per-widget and
+        # one-shot, so no `after` job outlives this point that `destroy()`
+        # does not take with it.
+        #
         # destroy() must happen no matter what. If it is skipped, the root
         # leaks and -- because ImageTk.PhotoImage binds to
         # tkinter._default_root -- every image created by a *later* root is

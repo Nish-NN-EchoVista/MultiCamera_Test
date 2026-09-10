@@ -51,7 +51,6 @@ class ListView:
 
     def __init__(self, master, ctx=None, *,
                  manager: DeviceManager,
-                 pulse,
                  offsets: dict,
                  devices: Sequence[DeviceState] | None = None,
                  on_add: Callable[[], None],
@@ -71,7 +70,6 @@ class ListView:
             self._is_shutting_down = self._ctx.is_shutting_down
 
         self.manager = manager
-        self.pulse = pulse
         #: Held by reference, not copied -- see the module docstring.
         self.offsets = offsets
 
@@ -220,7 +218,6 @@ class ListView:
             on_remove=self._on_remove,
             on_rename=self._on_rename,
             on_ip_change=self._on_ip_change,
-            pulse=self.pulse,
             label_offset=label_offset,
         )
         card.pack(fill="x", pady=(0 if first else theme.CARD_GAP, 0),

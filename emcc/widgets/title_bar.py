@@ -24,14 +24,12 @@ PIP_H = 14        # h-3.5
 
 
 class TitleBar(ctk.CTkFrame):
-    def __init__(self, master, pulse, on_close: Callable[[], None],
+    def __init__(self, master, on_close: Callable[[], None],
                  on_minimise: Callable[[], None], on_maximise: Callable[[], None],
                  on_drag_start: Callable, on_drag_move: Callable):
         super().__init__(master, height=theme.TITLEBAR_H, fg_color=theme.TITLEBAR_BG,
                          corner_radius=0)
         self.pack_propagate(False)
-
-        self._pulse = pulse
 
         # px-5, gap-4
         row = ctk.CTkFrame(self, fg_color="transparent")
@@ -134,7 +132,10 @@ class TitleBar(ctk.CTkFrame):
         self._online_dot.pack_propagate(False)
         ctk.CTkLabel(online, text="System Online", font=fonts.sans(11.5),
                      text_color=theme.TEXT_MUTED).pack(side="left", padx=(6, 0))
-        self._pulse.register(self._online_dot, theme.ONLINE_DOT, theme.TITLEBAR_BG)
+        # The dot is static since 2026-09-10. `theme.ONLINE_DOT` above is
+        # exactly what the ticker painted at frame 0 -- verified,
+        # `theme.over(c, bg, 1.0) == c` -- so dropping the animation leaves
+        # the resting colour unchanged.
 
         # -- connected count: four runs, four colours --
         count = ctk.CTkFrame(self._status, fg_color="transparent")
