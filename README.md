@@ -116,8 +116,10 @@ Observed live on the bench, and correct behaviour on EMCC's part:
   because that would hide a hardware fault: such a unit sits above the 65 °C
   threshold and renders red, which is the correct thing for the software to
   say about that hardware.
-- **Both units have since recovered, and only one repair is accounted for.**
-  A loose thermocouple was reported resolved, **device unspecified**, so both
+- **Both units recovered; `.253`'s repair is accounted for and `.251`'s is
+  not.** Nish confirmed 2026-09-10 that the loose thermocouple was `.253`
+  and that all thermocouples now read correctly. `.251` came back without a
+  reported repair, so
   are *recovered, cause unconfirmed* and both are queued for a stability
   re-probe. Treat a plausible reading on either as provisional until the cause
   is known — an unexplained recovery may be intermittent rather than repaired.

@@ -1,7 +1,16 @@
 # UI spec — Figma Make export → CustomTkinter
 
-Reference: `src/App.tsx` + `src/index.css` in the repo root (a Figma Make
-React export). This page records how each part of it maps onto Tk, so the port
+Reference: `design/src/App.tsx` + `design/src/index.css` (a Figma Make
+React export), **tracked in this repository as of 2026-09-10**.
+
+This page's claims are checked against that source, so it has to be
+readable from a clone. Until 2026-09-10 it was not: the files lived one
+directory ABOVE the repository root, untracked, and this line said "in the
+repo root" -- which was false, and false in the direction that hides the
+problem. Two questions were settled that day only because the export
+happened to exist on one machine. Copied in byte-identically (sha256
+verified on all four files) rather than moved, so the Figma export at
+`C:/Nish/MultiCam/src` remains the working copy for regeneration. This page records how each part of it maps onto Tk, so the port
 can be re-checked against the design without re-reading the JSX.
 
 Companion page: [`PLACEHOLDERS.md`](PLACEHOLDERS.md) — stubs and open questions.

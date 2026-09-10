@@ -59,23 +59,28 @@ The reading is an ADC conversion at ~200 °C per volt
 (`thermocouple.c:74-81`), so a loose or open-circuit thermocouple produces a
 large but well-formed number.
 
-**Both units have since recovered, and only one repair is accounted for.**
-Nish reported, verbatim: *"the thermocouple was lose, thats resolved"* --
-**device unspecified**. An earlier version of this section attributed that to
-`.253`; that was inference on my part presented as fact, and it is withdrawn.
+**ANSWERED BY NISH, 2026-09-10: the repair was `.253`, and all thermocouples
+are working now.** His earlier words were *"the thermocouple was lose, thats
+resolved"* with no device named; an earlier version of this section
+attributed that to `.253` as fact, which was inference, and it was withdrawn.
+**The inference was right and withdrawing it was still correct** -- it was
+unsupported when written, and being right by luck is not evidence. The
+attribution is restored here on Nish's word, not on the inference.
 
-So the current status of both is *recovered, cause unconfirmed*:
+Current status:
 
 | Unit | Was | Now | Cause |
 |---|---|---|---|
-| `192.168.2.251` | ~404 °C | ~25 °C | unconfirmed |
-| `192.168.2.253` | ~228-242 °C | plausible | unconfirmed |
+| `192.168.2.251` | ~404 °C | working | **still unconfirmed** |
+| `192.168.2.253` | ~228-242 °C | working | loose thermocouple, confirmed by Nish 2026-09-10 |
 
-One repair was reported and two units recovered, so **at least one recovery is
-unexplained whichever device was fixed.** That matters because an unexplained
-recovery may be an intermittent joint rather than a repair -- reading correctly
-right up until it does not. Both are queued for a stability re-probe, and one
-word from Nish naming the device collapses the ambiguity.
+**`.251`'s recovery remains unexplained**, and that is now the whole of the
+ambiguity rather than half of it: one repair is accounted for and one unit
+came back without one. It matters because an unexplained recovery may be an
+intermittent joint rather than a repair -- reading correctly right up until
+it does not. Nish reports all thermocouples working, so nothing is faulty
+today; `.251` stays queued for a stability re-probe on that basis, not
+because it is currently misreading.
 
 Recording it this way is the lesson as much as the fact: **his words and my
 attribution belong in separate sentences.** By the time an inference is a
