@@ -19,6 +19,7 @@ import pytest
 
 import customtkinter as ctk
 
+from emcc import app as app_module
 from emcc import fonts, icons, theme
 from emcc.app import App
 from emcc.backend.config_manager import ConfigManager
@@ -699,6 +700,39 @@ def test_scenario_j_shutdown_closes_everything(app, tmp_path):
 def test_shutdown_is_idempotent(app):
     app.shutdown()
     app.shutdown()      # must not raise
+
+
+def test_a_raising_log_call_still_flushes_the_handlers(app, monkeypatch):
+    """F7: `shutdown_logging()` must not share a `try` with the log line.
+
+    A handler can raise while the app is going down -- closed stream, full
+    disk, rotation mid-roll. When it did, `logging.shutdown()` was skipped and
+    nothing was flushed, so the run that failed at shutdown was exactly the
+    run whose log tail never reached disk.
+
+    Covers BOTH guards, because a raising `logger.info` hits both sites: the
+    "shutdown requested" line on `shutdown()`'s first statement and the
+    "shutdown complete" line beside `shutdown_logging()`. Reaching the
+    assertion at all requires the first to be guarded; the assertion passing
+    requires the second not to share its `try`.
+
+    Dies on: putting `logger.info(...)` and `shutdown_logging()` back in one
+    `try` block, AND separately on un-guarding the "shutdown requested" line
+    -- two distinct mutations, two distinct failures.
+    """
+    called = []
+    monkeypatch.setattr(app_module, "shutdown_logging",
+                        lambda: called.append(True))
+
+    def boom(*args, **kwargs):
+        raise OSError("handler is closed")
+
+    monkeypatch.setattr(app_module.logger, "info", boom)
+
+    app.shutdown()      # must not raise
+
+    assert called == [True], (
+        "shutdown_logging() was skipped because the log call raised")
 
 
 def test_wm_delete_window_is_bound_to_shutdown(app):

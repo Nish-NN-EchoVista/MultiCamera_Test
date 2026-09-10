@@ -580,7 +580,17 @@ class App(ctk.CTk):
         if self._shutting_down:
             return
         self._shutting_down = True
-        logger.info("shutdown requested")
+        # Guarded for the same reason as the `shutdown_logging()` call below,
+        # and this one is the reason that fix has any effect at all: a handler
+        # that raises at the end of teardown raises at the start of it too,
+        # and unguarded here it aborted `shutdown()` on its first line --
+        # before workers were stopped, before the config was persisted, before
+        # `destroy()`. Splitting the tail while leaving this bare would have
+        # been a fix that could never be reached.
+        try:
+            logger.info("shutdown requested")
+        except Exception:
+            pass
 
         # 1. stop accepting new work
         job = self._pump_job
@@ -640,11 +650,36 @@ class App(ctk.CTk):
         # tkinter._default_root -- every image created by a *later* root is
         # built in this dead interpreter instead, which surfaces much later as
         # `image "pyimageN" doesn't exist`.
+        # F7: two independent `try` blocks, not one shared with the log call.
+        #
+        # These shared a block, and the sharing meant a raising
+        # `logger.info` skipped `shutdown_logging()` -- so `logging.shutdown()`
+        # never ran and nothing was flushed or closed. A handler CAN raise
+        # here: a closed stream, a full disk, a rotating handler mid-roll.
+        # That is the exact run whose log tail you need on disk, which makes
+        # the failure self-concealing: the record of what went wrong is what
+        # gets dropped.
+        #
+        # Both `except` clauses stay bare-and-silent, deliberately. The thing
+        # that would report an error here is the logging subsystem being torn
+        # down, and there is no channel left to report on.
+        #
+        # `destroy()` keeps a `finally` spanning BOTH -- not one per block --
+        # so it still runs if either raises a `BaseException` that
+        # `except Exception` does not catch. It must happen no matter what: if
+        # it is skipped the root leaks and, because ImageTk.PhotoImage binds to
+        # tkinter._default_root, every image created by a *later* root is built
+        # in this dead interpreter, surfacing much later as
+        # `image "pyimageN" doesn't exist`.
         try:
-            logger.info("shutdown complete")
-            shutdown_logging()
-        except Exception:
-            pass
+            try:
+                logger.info("shutdown complete")
+            except Exception:
+                pass
+            try:
+                shutdown_logging()
+            except Exception:
+                pass
         finally:
             try:
                 self.destroy()
