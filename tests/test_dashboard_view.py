@@ -29,6 +29,10 @@ from emcc.views.base import DeviceView
 from emcc.widgets.dashboard_view import DashboardCard, DashboardView
 from emcc.widgets.view_toggle import DASHBOARD, LIST, ViewToggle
 
+#: What `fonts.tracked` inserts between characters (U+200A HAIR SPACE). Its
+#: presence in a string means letter-spacing has already been applied.
+HAIR_SPACE = " "
+
 
 def _config(tmp_path, count: int) -> ConfigManager:
     path = tmp_path / "config.json"
@@ -1062,5 +1066,31 @@ def test_show_resumes_a_build_that_hide_interrupted(tmp_path):
         view.build_now()
         assert len(view.cards) == 25
         assert len(view.cards) > interrupted
+    finally:
+        root.destroy()
+
+
+def test_heading_is_the_dashboard_subhead(tmp_path):
+    """The view owns the heading words; the shell owns how they look.
+
+    Added before `DeviceView` declares `heading`, so nothing derives a
+    requirement for it yet -- this is the direct test that it exists and is
+    right until the contract catches up, after which the derived property
+    check covers its presence and this covers its value.
+    """
+    root, _, view, _, _ = _view(tmp_path, 1)
+    try:
+        assert view.heading == theme.DASH_SUBHEAD
+        assert view.heading == "DASHBOARD OVERVIEW"
+
+        # Raw text, NOT letter-spaced: shell/subheader.py applies
+        # fonts.tracked(..., 0.12) at the render site. Returning a tracked
+        # string here would double-space it once the shell reads this.
+        assert HAIR_SPACE not in view.heading
+        assert view.heading != fonts.tracked(view.heading, 0.12)
+
+        # A property, so the derived conformance test can enforce it once
+        # DeviceView declares it. An annotated attribute could not be.
+        assert isinstance(getattr(DashboardView, "heading", None), property)
     finally:
         root.destroy()

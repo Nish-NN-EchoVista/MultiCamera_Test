@@ -412,6 +412,30 @@ class DashboardView(ctk.CTkFrame):
     name = "dashboard"
 
     @property
+    def heading(self) -> str:
+        """The sub-header heading for this view. Raw text, not tracked.
+
+        Letter-spacing is applied at the render site -- `shell/subheader.py`
+        wraps the heading in `fonts.tracked(..., 0.12)` -- so this returns the
+        plain string, the same division as `caption`: the view owns the words,
+        the shell owns how they look.
+
+        **A property rather than an annotated class attribute**, and that is
+        not cosmetic: `DeviceView` declares `name: str` as an annotation only,
+        and annotations appear in `__annotations__` rather than in `vars()`,
+        so the derived conformance test cannot see them. It enforces methods
+        by signature and properties by presence; an annotated attribute gets
+        no enforcement at all. A property is checked.
+
+        Landed here before `DeviceView` declares it, deliberately. The
+        conformance test derives what it demands from the contract, so adding
+        it to the contract first would make the test require a member this
+        class lacks -- correctly red, but red between two commits for no
+        reason. Having it early is inert; missing it is a failure.
+        """
+        return theme.DASH_SUBHEAD
+
+    @property
     def padding(self) -> dict:
         """`padx`/`pady` the host applies when packing `widget`.
 
