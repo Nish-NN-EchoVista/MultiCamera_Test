@@ -134,11 +134,26 @@ class DeviceView(Protocol):
         counts against the host's broken-view threshold.
         """
 
-    def add_device(self, device: DeviceState) -> None:
-        """A device appeared."""
-
-    def remove_device(self, device_id: str) -> None:
-        """A device went away."""
+    # `add_device` and `remove_device` are NOT on this contract, and the
+    # absence is deliberate rather than an omission.
+    #
+    # `ViewHost` had routing for both and it had no callers: the shell mutates
+    # the list view directly through `new_card`, so the host's methods stood
+    # between nothing and two implementations. F11 deleted the routing, and
+    # declaring a member the host never calls would leave this Protocol
+    # describing a path that does not exist -- the same defect as the `name`
+    # attribute this class carried until 535a480.
+    #
+    # THE VIEW-SIDE METHODS REMAIN AND ARE TESTED. `DashboardView` implements
+    # both and `tests/test_dashboard_view.py` exercises them directly -- 5
+    # `view.add_device(` and 4 `view.remove_device(` occurrences at b516d7e,
+    # counted by receiver because a bare-name grep also matches
+    # `manager.add_device(` and `config.add_device(`. Three classes share
+    # those names, which is how one reading of it produced "no reads
+    # anywhere" and another produced twelve.
+    #
+    # So this is not a claim that the methods are dead. It is a claim that the
+    # host does not route to them, which is what a host contract is for.
 
     def on_device_count_changed(self, total: int) -> None:
         """The device count changed. Required, never a defaulted no-op."""
