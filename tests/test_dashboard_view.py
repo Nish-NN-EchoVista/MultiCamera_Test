@@ -13,6 +13,7 @@ full `App` costs a splash and ~900 widgets.
 from __future__ import annotations
 
 import gc
+import inspect
 import json
 import time
 import tkinter
@@ -24,6 +25,7 @@ from emcc import fonts, theme
 from emcc.backend.config_manager import ConfigManager
 from emcc.backend.device_manager import DeviceManager
 from emcc.backend.events import ConnectionState
+from emcc.views.base import DeviceView
 from emcc.widgets.dashboard_view import DashboardCard, DashboardView
 from emcc.widgets.view_toggle import DASHBOARD, LIST, ViewToggle
 
@@ -387,9 +389,14 @@ def test_render_device_reports_an_unknown_id(tmp_path):
 def test_caption_counts_devices_and_slots(tmp_path):
     root, manager, view, _, _ = _view(tmp_path, 3)
     try:
-        assert view.caption() == "3 devices · 0 connected · 3 of 25 slots"
+        total = len(manager.devices)
+        assert view.caption(total) == "3 devices · 0 connected · 3 of 25 slots"
         manager.devices[0].connection = ConnectionState.CONNECTED
-        assert view.caption() == "3 devices · 1 connected · 3 of 25 slots"
+        assert view.caption(total) == "3 devices · 1 connected · 3 of 25 slots"
+
+        # `total` is accepted and ignored: both halves come from _devices so
+        # they cannot disagree. A wrong total must not reach the output.
+        assert view.caption(999) == "3 devices · 1 connected · 3 of 25 slots"
     finally:
         root.destroy()
 
@@ -397,7 +404,7 @@ def test_caption_counts_devices_and_slots(tmp_path):
 def test_caption_singular_for_one_device(tmp_path):
     root, _, view, _, _ = _view(tmp_path, 1)
     try:
-        assert view.caption().startswith("1 device ·")
+        assert view.caption(1).startswith("1 device ·")
     finally:
         root.destroy()
 
@@ -663,8 +670,22 @@ def test_on_device_count_changed_reflows_the_grid_while_visible(tmp_path):
 
 
 def test_the_view_declares_its_padding_for_the_host(tmp_path):
-    """Geometry is the host's to apply, the padding is the view's to choose."""
-    assert DashboardView.padding == (theme.PAGE_PAD_X, theme.PAGE_PAD_Y)
+    """Geometry is the host's to apply, the padding is the view's to choose.
+
+    The shape is asserted by test_padding_is_a_mapping_the_host_can_splat;
+    this one asserts the *reason* padding is per-view rather than a host
+    constant -- the two views deliberately want different values, because
+    ListView insets by 8 so its scrollbar sits in the page margin and this
+    grid has no scrollbar to make room for.
+    """
+    from emcc.views.list_view import ListView
+    root, _, view, _, _ = _view(tmp_path, 1)
+    try:
+        assert view.padding == {"padx": theme.PAGE_PAD_X,
+                                "pady": theme.PAGE_PAD_Y}
+        assert ListView.padding.fget(None) != view.padding
+    finally:
+        root.destroy()
 
 
 def test_a_streamed_build_stops_when_the_shell_is_shutting_down(tmp_path):
@@ -697,21 +718,74 @@ def test_a_streamed_build_stops_when_the_shell_is_shutting_down(tmp_path):
 # See .claude/parallel/VIEW_CONTRACT.md.
 # ---------------------------------------------------------------------------
 
-CONTRACT_METHODS = [
-    "set_devices", "render_device", "add_device", "remove_device",
-    "on_device_count_changed", "show", "hide", "shutdown",
-]
+# The expected members are DERIVED from `DeviceView`, never transcribed.
+# A hardcoded list is what let `caption` go unchecked: the list held eight
+# names, `caption` was not among them, and the assertion was `callable(...)`
+# -- presence where the contract specifies a *signature*. So the real defect
+# (`caption(self)` against `caption(self, total)`) passed `hasattr` and
+# `callable` and would have raised TypeError only at mount time.
+#
+# Deriving means a new contract method, or a changed signature, is caught
+# without anyone remembering to update this file.
 
 
-def test_every_contract_method_exists_and_is_callable():
-    for method in CONTRACT_METHODS:
-        assert callable(getattr(DashboardView, method, None)), method
+def _contract_members():
+    """-> ({method name: Signature}, {property names}) read from DeviceView."""
+    methods, properties = {}, set()
+    for name, member in vars(DeviceView).items():
+        if name.startswith("_"):
+            continue
+        if isinstance(member, property):
+            properties.add(name)
+        elif callable(member):
+            methods[name] = inspect.signature(member)
+    return methods, properties
+
+
+def test_the_contract_is_readable_and_non_trivial():
+    """Guard the guard: an empty derivation would pass everything below."""
+    methods, properties = _contract_members()
+    assert len(methods) >= 8, methods
+    assert "caption" in methods, "derivation missed caption -- the original bug"
+    assert properties >= {"widget", "padding"}, properties
+
+
+def test_every_contract_method_matches_the_contract_signature():
+    methods, _ = _contract_members()
+    for name, expected in methods.items():
+        actual = getattr(DashboardView, name, None)
+        assert callable(actual), f"{name} missing"
+        got = inspect.signature(actual)
+        # Parameter names and order, not annotations: an annotation that
+        # differs is not a wiring fault, a missing parameter is.
+        assert list(got.parameters) == list(expected.parameters), (
+            f"{name}{got} does not match contract {name}{expected}"
+        )
+
+
+def test_every_contract_property_is_present():
+    _, properties = _contract_members()
+    for name in properties:
+        assert isinstance(getattr(DashboardView, name, None), property), name
+
+
+def test_padding_is_a_mapping_the_host_can_splat(tmp_path):
+    """The host packs with `**view.padding` (views/host.py:112).
+
+    A two-tuple satisfies "has a padding attribute" and then raises
+    `TypeError: argument after ** must be a mapping` inside the host's pack
+    call. It was a tuple until the seam landed.
+    """
+    root, _, view, _, _ = _view(tmp_path, 1)
+    try:
+        assert dict(**view.padding) == {"padx": theme.PAGE_PAD_X,
+                                       "pady": theme.PAGE_PAD_Y}
+    finally:
+        root.destroy()
 
 
 def test_contract_attributes_are_present():
     assert DashboardView.name == "dashboard"
-    assert isinstance(DashboardView.padding, tuple)
-    assert len(DashboardView.padding) == 2
     assert isinstance(getattr(DashboardView, "widget", None), property)
 
 
@@ -933,7 +1007,7 @@ def test_caption_is_coherent_after_a_device_is_added_while_hidden(tmp_path):
         view.add_device(extra)
 
         # No sync has run. The caption must still describe one fleet.
-        caption = view.caption()
+        caption = view.caption(len(manager.devices))
         assert caption == "4 devices · 4 connected · 4 of 25 slots", caption
 
         # The invariant, independent of the wording: there cannot be more

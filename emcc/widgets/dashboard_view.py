@@ -411,11 +411,21 @@ class DashboardView(ctk.CTkFrame):
     #: per-view exception log.
     name = "dashboard"
 
-    #: Padding the host should apply when packing this view. Declared here
-    #: because it is the view's design decision, applied by the host because
-    #: geometry is the host's job. The List view wants PAGE_PAD_X - 8 to sit
-    #: its scrollbar in the page margin; this grid wants the full pad.
-    padding = (theme.PAGE_PAD_X, theme.PAGE_PAD_Y)
+    @property
+    def padding(self) -> dict:
+        """`padx`/`pady` the host applies when packing `widget`.
+
+        A **mapping**, not a tuple: the host packs with
+        `view.widget.pack(..., **view.padding)` (`views/host.py:112`), so a
+        two-tuple raises `TypeError: argument after ** must be a mapping`.
+        This was a tuple until the seam landed, which would have failed the
+        mount at the pack call rather than anywhere informative.
+
+        The value is the view's design decision and the host applies it:
+        `ListView` wants `PAGE_PAD_X - 8` so its scrollbar sits in the page
+        margin, this grid wants the full pad.
+        """
+        return {"padx": theme.PAGE_PAD_X, "pady": theme.PAGE_PAD_Y}
 
     def __init__(self, master, ctx=None, *,
                  manager: DeviceManager | None = None,
@@ -729,8 +739,23 @@ class DashboardView(ctk.CTkFrame):
         """Cells on one screenful of grid -- 25 for a 5x5."""
         return theme.DASH_COLS * theme.DASH_COLS
 
-    def caption(self) -> str:
+    def caption(self, total: int) -> str:
         """Sub-header caption: '3 devices - 1 connected - 3 of 25 slots'.
+
+        **`total` is accepted and deliberately ignored.** The host passes
+        `len(manager.devices)`, which is authoritative -- but this line
+        renders *two* numbers and the contract carries no connected count, so
+        `connected` can only come from `self._devices`. Taking the total from
+        the host and the connected count from here would put the two halves
+        on different sources, which is precisely the defect fixed below:
+        "3 devices - 4 connected" is reachable the moment they disagree.
+        Authoritative for one half is worse than consistent across both, so
+        both come from `_devices` and the parameter is unused.
+
+        If host-authoritative counts are ever wanted, the contract needs
+        `caption(self, total, connected)` -- then both halves come from the
+        shell and the inconsistency is impossible by construction. That is a
+        contract change, not something to fake from here.
 
         Both counts come from `_devices`. Taking the total from `_order`
         instead -- which is only rewritten inside `sync()` -- meant a device
