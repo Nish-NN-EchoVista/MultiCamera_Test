@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from typing import Callable, Sequence
 
+import logging
 import tkinter
 
 import customtkinter as ctk
@@ -48,6 +49,8 @@ from ..backend.events import ConnectionState
 from .buttons import AutoButton, CleanButton
 from .canvas_util import scaling
 from .connection_view import connection_visual
+
+logger = logging.getLogger("emcc.dashboard")
 
 #: Distinct from None, which is a real value for `latest_temperature`.
 _UNSET = object()
@@ -518,6 +521,21 @@ class DashboardView(ctk.CTkFrame):
             # Narrowed from `except Exception`, and the `# pragma: no cover`
             # is gone with it: the branch is provokable by deleting the
             # attribute, so it is tested rather than annotated away.
+            #
+            # IT LOGS, and with `exc_info`, because the thing it contains is a
+            # BROKEN ASSUMPTION ABOUT A DEPENDENCY rather than an expected
+            # runtime condition. Silence here means a CustomTkinter upgrade
+            # quietly widens the scrollbar and nothing ever says why. Carrying
+            # the traceback puts the site in the containment fixture's view --
+            # `TRACKED` rather than `HANDLER_UNDECLARED` -- so it is counted
+            # by the thing that counts containment, which is the whole reason
+            # the tier exists.
+            logger.warning(
+                "dashboard: could not narrow the scrollbar -- "
+                "CTkScrollableFrame._scrollbar is missing, so it keeps its "
+                "default width. Cosmetic; likely a CustomTkinter rename.",
+                exc_info=True,
+            )
             pass
 
         for column in range(theme.DASH_COLS):
@@ -729,6 +747,23 @@ class DashboardView(ctk.CTkFrame):
                 # Tk then reports `bad window path name`. Narrowed from
                 # `except Exception` and tested, so the `# pragma: no cover`
                 # is gone.
+                #
+                # DELIBERATELY SILENT, and the sibling handler in `__init__`
+                # deliberately is not. The audit item that reached both asked
+                # for four sites to log; two of the four had already been
+                # narrowed or deleted, and of the two left these want OPPOSITE
+                # dispositions. The difference is what the exception MEANS:
+                #
+                #   __init__   a dependency's private attribute vanished --
+                #              an assumption broke, nobody knows, log it
+                #   here       a view was destroyed mid-teardown while a
+                #              removal was in flight -- ORDINARY, EXPECTED,
+                #              and it happens on every close
+                #
+                # Logging this one would emit a WARNING on normal shutdown,
+                # which trains a reader to ignore the channel. A handler is
+                # not a defect merely because it is quiet; batch-converting
+                # the quiet ones is how a log becomes noise.
                 pass
 
     # -- painting ---------------------------------------------------------

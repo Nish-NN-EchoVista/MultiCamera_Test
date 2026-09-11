@@ -1163,6 +1163,7 @@ def test_heading_is_the_dashboard_subhead(tmp_path):
 # narrowed: `after_cancel` raises nothing, so no branch survives to test.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.allow_contained_exceptions
 def test_an_upstream_scrollbar_rename_degrades_cosmetically(tmp_path, monkeypatch):
     """`_scrollbar` is CustomTkinter's private attribute; losing it is cosmetic.
 
@@ -1175,6 +1176,13 @@ def test_an_upstream_scrollbar_rename_degrades_cosmetically(tmp_path, monkeypatc
     Verified first that a `CTkScrollableFrame` still constructs, packs, takes
     30 children and survives an update without it -- so a failure here means
     the handler, not the fixture.
+
+    MARKED `allow_contained_exceptions` because the handler now logs
+    with `exc_info`, which is the point: a broken assumption about a
+    dependency should reach the log rather than vanish.
+    The marker is the cost of that
+    visibility, and it is the right cost -- an unmarked test here would mean
+    the site had gone quiet again.
     """
     class NoScrollbar(ctk.CTkScrollableFrame):
         def __init__(self, *args, **kwargs):
