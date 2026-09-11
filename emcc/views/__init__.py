@@ -1,7 +1,7 @@
 """Device views and the host that routes to them.
 
 A *view* renders the device set. Two exist: the list (`list_view.ListView`)
-and the dashboard (`widgets/dashboard_view.DashboardView`). They are
+and the dashboard (`views/dashboard_view.DashboardView`). They are
 deliberately different shapes -- the Dashboard *is* a `CTkFrame`, `ListView`
 is a controller that owns one -- which is why `base.DeviceView` declares
 `widget` rather than assuming a view is one.

@@ -26,7 +26,7 @@ from emcc.backend.config_manager import ConfigManager
 from emcc.backend.device_manager import DeviceManager
 from emcc.backend.events import ConnectionState
 from emcc.views.base import DeviceView
-from emcc.widgets.dashboard_view import DashboardCard, DashboardView
+from emcc.views.dashboard_view import DashboardCard, DashboardView
 from emcc.widgets.view_toggle import DASHBOARD, LIST, ViewToggle
 
 #: What `fonts.tracked` inserts between characters (U+200A HAIR SPACE). Its

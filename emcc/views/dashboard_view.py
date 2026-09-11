@@ -46,9 +46,9 @@ import customtkinter as ctk
 from .. import fonts, theme
 from ..backend.device_manager import DeviceManager, DeviceState
 from ..backend.events import ConnectionState
-from .buttons import AutoButton, CleanButton
-from .canvas_util import scaling
-from .connection_view import connection_visual
+from ..widgets.buttons import AutoButton, CleanButton
+from ..widgets.canvas_util import scaling
+from ..widgets.connection_view import connection_visual
 
 logger = logging.getLogger("emcc.dashboard")
 

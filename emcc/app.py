@@ -41,7 +41,7 @@ from .views.base import StandaloneCtx
 from .views.host import ViewHost
 from .views.list_view import CARD_BUILD_INTERVAL_MS, INITIAL_CARDS, ListView
 from .widgets.add_device import AddDeviceButton
-from .widgets.dashboard_view import DashboardView
+from .views.dashboard_view import DashboardView
 from .widgets.device_card import DeviceCard
 from .widgets.dialogs import ConfirmDialog, ErrorReporter
 from .widgets.title_bar import TitleBar

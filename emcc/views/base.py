@@ -28,7 +28,7 @@ class StandaloneCtx:
     shutting down. Deliberately not something the host can hand out by
     accident -- it exists so a view stays constructible on its own.
 
-    `widgets/dashboard_view.py` carries its own equivalent, written before
+    `views/dashboard_view.py` carries its own equivalent, written before
     this module existed. Unifying them means editing that file, which is
     Worker 2's lane and a change with no behavioural payoff, so the
     duplication is left in place and noted rather than tidied across a lane
