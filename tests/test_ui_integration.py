@@ -24,7 +24,7 @@ from emcc import fonts, icons, theme
 from emcc.shell.subheader import HEADING_TRACKING
 from emcc.app import App
 from emcc.backend.config_manager import ConfigManager
-from emcc.backend.events import ConnectionState
+from emcc.backend.events import ConnectionState, DeviceEvent, EventType
 from emcc.backend.protocol import (
     CLEAN_COMPLETE,
     CMD_AUTO_OFF,
@@ -1095,6 +1095,120 @@ def test_a_config_save_error_reaches_the_operator_dialog(app):
 
     assert "disk full" in body, f"the dialog did not carry the cause: {body!r}"
     assert "Configuration" in body, f"not the config error dialog: {body!r}"
+
+
+def test_rendering_a_card_does_not_announce_its_fault(app):
+    """Repainting is not a way to pop a dialog. Slice 3 separated these.
+
+    Before slice 3 one function repainted the card *and* popped the error
+    dialog, so any code path that wanted a repaint got an interruption it had
+    not asked for. `shell/pump.py`'s module docstring records that nothing in
+    the suite would have caught the separation being undone -- the coupling was
+    removed and the tests stayed green either way. This is that missing half.
+
+    **Read together with the test below, which is this one's positive
+    control.** Asserting "no dialog appeared" is vacuous on its own: a harness
+    that never shows a dialog, a fixture that swallows Toplevels, or an
+    `app` too dead to render would all pass it while asserting nothing. The
+    next test uses the same fixture, the same device and the same fault to
+    show a dialog DOES appear through the event path, so the pair distinguishes
+    "rendering does not announce" from "nothing announces here". Keep them
+    adjacent; separating them re-opens the vacuity.
+
+    Dies on: `shell/pump.render_device` calling `announce_faults`, or
+    `App._render_device` being re-pointed at `apply_device_change`.
+    """
+    device = app.manager.devices[0]
+    device.connection = ConnectionState.ERROR
+    device.last_error = "probe: link refused"
+    device.fault_announced = False
+
+    app._render_device(device.id)
+    _pump(app, 6)
+
+    dialogs = [c for c in app.winfo_children() if isinstance(c, ctk.CTkToplevel)]
+    try:
+        assert not dialogs, (
+            "repainting a faulted card popped a dialog: rendering and "
+            "announcing are coupled again"
+        )
+    finally:
+        for dialog in dialogs:
+            dialog.destroy()
+        _pump(app, 2)
+
+    assert not device.fault_announced, (
+        "a render marked the fault announced, so the real event that follows "
+        "will now be coalesced away and the operator will never see it"
+    )
+
+
+def test_a_device_event_both_repaints_and_announces(app):
+    """The composed operation, driven through the real intake path.
+
+    Reaches nothing new: the event goes on `app.manager.events`, which is the
+    queue the worker threads write to, and `app._pump()` is the drain the Tk
+    timer calls. So this exercises the same route a real connection failure
+    takes, and pins `apply_device_change` doing BOTH halves rather than
+    `App._on_device_changed` being wired to the rendering half alone.
+
+    Driven through the queue rather than by calling the callback, because the
+    callback is not reached from outside `emcc/` and a test that reached it
+    would have to be declared on the facade -- widening the contract to admit
+    a test is how a guard stops being one. The queue is already public
+    surface.
+
+    This is also the positive control for the test above: same fixture, same
+    device, same fault, dialog present.
+
+    **Waits rather than pumping a fixed number of times.** The fault dialog is
+    coalesced on a 700 ms window -- several devices behind one switch fail
+    together and the design shows one modal, not one per device -- so
+    `announce_faults` returning is not the same event as a dialog existing.
+    Six pump cycles complete in milliseconds and saw nothing; that read as
+    "no announcement" when it was "not yet". A fixed pump count here would be
+    a test whose passing depended on `window_ms`.
+
+    Dies on: `apply_device_change` dropping its `announce_faults` call, and on
+    `CONNECTION_FAILED` no longer setting `ConnectionState.ERROR`.
+    """
+    device = app.manager.devices[0]
+    assert not device.fault_announced, "fixture precondition: nothing announced yet"
+
+    app.manager.events.put(DeviceEvent(
+        type=EventType.CONNECTION_FAILED, device_id=device.id,
+        message="probe: link refused",
+    ))
+    app._pump()
+    _pump(app, 6)
+
+    assert device.connection is ConnectionState.ERROR, (
+        "the event did not reach backend state, so this test is not "
+        "controlling anything"
+    )
+    assert device.fault_announced, (
+        "a device event repainted without announcing: the composition in "
+        "`apply_device_change` is broken"
+    )
+
+    def _dialog_open():
+        return any(isinstance(c, ctk.CTkToplevel) for c in app.winfo_children())
+
+    assert _pump_until(app, _dialog_open, timeout=5.0), (
+        "a final connection failure reached no operator dialog within 5s, "
+        "against a 700ms coalescing window"
+    )
+    dialogs = [c for c in app.winfo_children() if isinstance(c, ctk.CTkToplevel)]
+    try:
+        texts = _label_texts(dialogs[-1])
+    finally:
+        for dialog in dialogs:
+            dialog.destroy()
+        _pump(app, 2)
+
+    assert any("probe: link refused" in text for text in texts), (
+        f"the dialog did not carry the cause: {texts!r}"
+    )
 
 
 def test_shutdown_is_idempotent(app):
