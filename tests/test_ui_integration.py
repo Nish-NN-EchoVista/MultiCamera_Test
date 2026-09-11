@@ -1211,6 +1211,99 @@ def test_a_device_event_both_repaints_and_announces(app):
     )
 
 
+#: MIDDLE DOT, written as an escape so this file stays pure ASCII. The tests
+#: below pin a character that four commits corrupted invisibly, and a literal
+#: `\u00b7` here would be corruptible by exactly the mechanism under test --
+#: if both the source and this file were re-encoded together the comparison
+#: would still pass. An escape cannot be mangled by a text round-trip.
+_MIDDLE_DOT = "\u00b7"
+
+#: What a UTF-8 character looks like after being decoded as cp1252 and
+#: re-encoded as UTF-8. Spelled as escapes for the same reason.
+_DOUBLE_ENCODED = (
+    "\u00e2\u20ac\u201d",    # em dash   U+2014
+    "\u00e2\u20ac\u00a6",    # ellipsis  U+2026
+    "\u00c2\u00b7",          # middle dot U+00B7
+    "\u00c3\u201a",          # a second round of the same on U+00C2
+)
+
+
+def test_the_list_caption_separator_is_a_middle_dot(app):
+    """The caption is asserted EXACTLY, separator included.
+
+    Every other caption assertion in this file uses
+    `.startswith("3 devices configured")`, which stops one character before
+    the separator -- and that is precisely why a corrupted separator survived
+    four commits with the suite green. The Dashboard's caption is asserted
+    exactly (`test_dashboard_view.py`) and was never corrupted; the List's was
+    asserted by prefix and was. The coverage shape predicted which one broke.
+
+    Dies on: any change to the caption wording, and on the separator being
+    re-encoded.
+    """
+    _pump(app, 6)
+    assert len(app.manager.devices) == 3, "fixture precondition"
+    assert app._caption.cget("text") == (
+        f"3 devices configured {_MIDDLE_DOT} "
+        "click Connect to establish TCP connection"
+    ), f"caption drifted or its separator was re-encoded: {app._caption.cget('text')!r}"
+
+
+def test_no_source_file_contains_a_double_encoded_character():
+    """No file under `emcc/`, `tests/` or `tools/` carries mojibake.
+
+    Written instead of more string assertions, because asserting each string
+    only guards the strings someone remembered. This asserts the *artefact*,
+    so it covers wording nobody has written yet -- the same reason the facade
+    completeness test scans rather than listing.
+
+    The defect it exists for: a generator script read git blobs with
+    `subprocess.run(..., text=True)`, which decodes with the locale encoding
+    (cp1252 here) rather than UTF-8, and wrote the result back. An em dash
+    became three characters, and a second pass corrupted those again. Four
+    commits carried it into `integrations.py`, `shell/handoff.py` and
+    `views/list_view.py`. NOTHING FAILED: the operator-facing strings affected
+    are either unasserted or asserted by prefix up to the character before.
+
+    Carries its own positive control. A scan that reports zero is worthless
+    without evidence it can report non-zero, and this file's population is
+    exactly the kind of negative that reads as reassurance.
+
+    Dies on: reintroducing any of the sequences, and on the detector being
+    narrowed so the control sample stops matching.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    control = f"exit code 1 {_DOUBLE_ENCODED[0]} see logs"
+    assert any(seq in control for seq in _DOUBLE_ENCODED), (
+        "the detector does not match a known-bad sample, so a clean result "
+        "from it would mean nothing"
+    )
+
+    scanned, offences = 0, []
+    for directory in ("emcc", "tests", "tools"):
+        for path in sorted((root / directory).rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            scanned += 1
+            text = path.read_bytes().decode("utf-8")
+            for seq in _DOUBLE_ENCODED:
+                if seq in text:
+                    offences.append(
+                        f"{path.relative_to(root).as_posix()}: "
+                        f"{text.count(seq)}x {seq.encode('unicode_escape').decode()}"
+                    )
+
+    assert scanned > 40, (
+        f"only {scanned} files scanned; the population is wrong and a clean "
+        "result would be an empty search rather than a negative one"
+    )
+    assert not offences, (
+        f"double-encoded text in {len(offences)} place(s) of {scanned} files "
+        f"scanned: {offences}"
+    )
+
+
 def test_shutdown_is_idempotent(app):
     app.shutdown()
     app.shutdown()      # must not raise

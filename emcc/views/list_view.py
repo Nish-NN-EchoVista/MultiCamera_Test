@@ -153,7 +153,7 @@ class ListView:
         return theme.LIST_SUBHEAD
 
     def caption(self, total: int) -> str:
-        return (f"{total} device{'' if total == 1 else 's'} configured Ãƒâ€šÃ‚Â· "
+        return (f"{total} device{'' if total == 1 else 's'} configured · "
                 "click Connect to establish TCP connection")
 
     def show(self) -> None:
