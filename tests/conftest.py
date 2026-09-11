@@ -27,6 +27,41 @@ import pytest
 from emcc import fonts, icons
 
 
+def pytest_configure(config):
+    """Refuse `-qq`, because it deletes the summary line silently.
+
+    `pytest.ini`'s `addopts` already carries `-q`, so `verbose` is -1 before
+    any command line is read. A session adding its own `-q` lands on -2, at
+    which point pytest stops printing the `N passed` line **and says nothing
+    about having done so**. The run still passes; the number the caller came
+    for is simply absent, and absence reads as a tooling quirk rather than as
+    a lost result.
+
+    Four sessions lost a summary line to this in two days -- after it had been
+    diagnosed, written down and circulated. That is the argument for a gate
+    rather than a note: the rule was known every time and did not fire,
+    because typing `-q` does not present itself as the moment the rule is
+    about.
+
+    The gate sits at the pytest-invocation boundary, the only place that sees
+    the composed verbosity. It cannot live in a memory file or an intention.
+
+    Deliberately NOT the alternative of dropping `-q` from `addopts`: that
+    changes default output for every run to solve a problem that only occurs
+    when someone doubles it, and leaves `-qq` silently lossy for anyone who
+    then passes it on purpose.
+    """
+    if config.option.verbose <= -2:
+        raise pytest.UsageError(
+            "-qq suppresses the summary line. pytest.ini's addopts already "
+            "sets -q (verbose=-1), so adding another lands on verbose="
+            f"{config.option.verbose} and the 'N passed' line disappears "
+            "without warning. Drop your -q, or pass --junitxml and read the "
+            "counts from there -- which is this project's standing rule "
+            "anyway: numbers come from junit, never the terminal."
+        )
+
+
 @pytest.fixture(autouse=True)
 def _tk_isolation():
     yield
