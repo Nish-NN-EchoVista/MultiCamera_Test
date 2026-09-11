@@ -153,7 +153,7 @@ class ListView:
         return theme.LIST_SUBHEAD
 
     def caption(self, total: int) -> str:
-        return (f"{total} device{'' if total == 1 else 's'} configured Ã‚Â· "
+        return (f"{total} device{'' if total == 1 else 's'} configured Ãƒâ€šÃ‚Â· "
                 "click Connect to establish TCP connection")
 
     def show(self) -> None:
@@ -334,10 +334,28 @@ class ListView:
         shell's `_refresh_chrome` now calls *this*, so calling back would
         recurse without terminating.
 
-        Both branches stay guarded on a cached flag. Re-applying `pack()` or
-        `grid()` to a widget that already has it re-runs its geometry and
-        triggers a redraw, and this runs on every chrome refresh, so the
-        no-op case has to be a genuine no-op.
+        Both branches stay guarded, but **no longer both on a cached flag** --
+        the hint compares against `_hint_shown`, the scrollbar against
+        `bool(grid_info())`. This paragraph claimed both were cached until
+        `8366654` derived one of them; Tk allows the derivation for `grid` and
+        not for `pack`, so the asymmetry is forced rather than chosen. See
+        `_set_scrollbar_visible`.
+
+        The guards earn their place on redraw, not on cost. Re-applying
+        `pack()` to a widget that already has it re-runs its geometry, and
+        this runs on every chrome refresh, so the no-op case has to be a
+        genuine no-op. MEASURED, because the magnitude was never checked when
+        that reason was written: including the idle geometry pass it provokes,
+        a redundant `pack()` costs **+1.5 us** per refresh over a do-nothing
+        control and a redundant `pack_forget()` **+0.8 us**. At ten refreshes
+        a second that is ~15 us/s. So the guards are worth keeping and are not
+        worth defending further -- which is the reason there is no mirror of
+        `test_scroll_hint_is_not_repacked_on_every_refresh` for the hidden
+        branch. That test was queued and then declined on measurement: the
+        mutation it was written for (`if scrolling and scrolling != ...`) is
+        already caught by `test_scroll_hint_appears_only_at_the_threshold`,
+        which drives the transition *down* through the threshold, and the only
+        mutation left escaping costs 0.8 us a refresh.
         """
         # No device cap: the design's "supports up to 25" was a demo limit.
         self.hint.configure(text=f"Scroll to view all {total} devices")
