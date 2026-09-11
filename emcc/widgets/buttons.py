@@ -402,6 +402,27 @@ class TempButton(ctk.CTkFrame):
 
         Predates the paint-diff: verified by running the same probe against
         `b516d7e`, byte-identical result.
+
+        **`_alert_shown` IS A CACHED BELIEF ABOUT WIDGET STATE, and it
+        passes the same sole-writer test the paint-diff had to pass.**
+        It short-circuits this whole method, so if anything changed the alert
+        display without coming through here the belief would go stale and the
+        badge would stop tracking the device -- the failure mode `ViewHost`
+        had before F11, one layer down. Checked by AST rather than by eye,
+        every `pack` / `pack_forget` / `configure` on the three widgets
+        this display owns:
+
+            TempButton   :410 :411 :412 :414 :416 :417 :418   ALL in _sync_alert
+            ConnectionButton :137                             a DIFFERENT class
+
+        Seven writers, all here. The eighth hit is `ConnectionButton._caption`,
+        which shares a name and nothing else -- the same-name-different-class
+        trap that produced a wrong read of this file once already, so the
+        check attributes each site to its class rather than matching
+        `self._caption` across the module.
+
+        Re-check if a second writer appears -- including one in a library,
+        which arrives without a commit in this repo.
         """
         alert = self._device.temperature_alert
         if alert == self._alert_shown:
