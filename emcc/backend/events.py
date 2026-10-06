@@ -47,6 +47,11 @@ class EventType(Enum):
     RECONNECT_FAILED = auto()      # all attempts exhausted
     TEMPERATURE = auto()
     CLEAN_COMPLETE = auto()
+    DEICE_COMPLETE = auto()
+    #: Defog left its loop. Unlike AUTO_ACK this is acted on rather than only
+    #: logged: the firmware ends defog by itself on a max-run timeout or a
+    #: stale thermocouple, and nothing else tells the UI that happened.
+    DEFOG_EXITED = auto()
     AUTO_ACK = auto()
     #: The AdapterController hit its thermal limit and sent `stop` to both
     #: boards, so any Clean in progress has already been aborted upstream.

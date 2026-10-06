@@ -17,7 +17,13 @@ import pytest
 from emcc.backend.config_manager import ConfigManager
 from emcc.backend.device_manager import DeviceManager
 from emcc.backend.events import ConnectionState, DeviceEvent, EventType
-from emcc.backend.protocol import CMD_AUTO_OFF, CMD_AUTO_ON
+from emcc.backend.protocol import (
+    CMD_AUTO_OFF,
+    CMD_AUTO_ON,
+    CMD_DEFOG_OFF,
+    CMD_DEFOG_ON,
+    CMD_DEICE,
+)
 
 from tools.mock_nport import MockConfig, MockNPort
 
@@ -371,6 +377,186 @@ def test_clean_completion_for_second_board_is_harmless(manager):
 # ---------------------------------------------------------------------------
 # Auto
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# De-ice -- Clean's shape, so these mirror the Clean tests above
+# ---------------------------------------------------------------------------
+
+def test_deice_requires_a_connection(manager):
+    device = manager.devices[0]
+    assert manager.start_deice(device.id) is False
+    assert device.deice_active is False
+
+
+def test_deice_sends_the_bare_command(manager):
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+        assert manager.start_deice(device.id) is True
+        assert device.deice_active is True
+        _wait_for_commands(mock, 1)
+        assert CMD_DEICE in mock.received_commands
+
+
+def test_deice_completion_clears_flag_and_cancels_timer(manager):
+    """Completion must cancel the timeout, not merely clear the flag.
+
+    Dies on: dropping `_cancel_deice_timer` from the DEICE_COMPLETE branch,
+    which leaves a callback scheduled past the sequence it belonged to -- the
+    same hole the Clean version of this test was written to close.
+    """
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.start_deice(device.id)
+        timer = device._deice_timer
+        assert timer is not None and timer in manager.scheduler.jobs
+
+        put(manager, EventType.DEICE_COMPLETE, device.id, channel=1)
+        assert device.deice_active is False
+        assert timer not in manager.scheduler.jobs
+        assert device._deice_timer is None
+
+
+def test_deice_timeout_clears_the_flag(manager):
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+        assert manager.start_deice(device.id) is True
+        manager.scheduler.fire_all()
+        assert device.deice_active is False
+
+
+def test_deice_and_clean_track_separately(manager):
+    """One timer each, and one flag each.
+
+    Dies on: sharing `_clean_timer` between the two, which would make the
+    second press cancel the first operation's timeout and leave that flag
+    stuck on until the link dropped.
+    """
+    with MockNPort(MockConfig(clean_duration_s=99)) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.scheduler.fire_all()          # clear the auto-reset timer
+
+        manager.start_clean(device.id)
+        manager.start_deice(device.id)
+        assert device.clean_active is True
+        assert device.deice_active is True
+        assert device._clean_timer is not device._deice_timer
+        assert manager.scheduler.pending == 2
+
+        put(manager, EventType.DEICE_COMPLETE, device.id)
+        assert device.deice_active is False
+        assert device.clean_active is True     # untouched
+
+
+# ---------------------------------------------------------------------------
+# Defog -- a ~3 minute sequence, so Clean's shape rather than Auto's, with a
+# second press meaning abort
+# ---------------------------------------------------------------------------
+
+def test_defog_requires_a_connection(manager):
+    device = manager.devices[0]
+    assert manager.press_defog(device.id) is False
+    assert device.defog_active is False
+
+
+def test_defog_press_starts_and_second_press_stops(manager):
+    """The press pair sends start then stop, not start twice.
+
+    Dies on: treating the second press as a re-trigger. Three minutes is long
+    enough that pressing a lit Defog means "stop", and re-sending
+    `start_defog` would leave the operator with no way to end it early.
+    """
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+
+        assert manager.press_defog(device.id) is True
+        assert device.defog_active is True
+        assert device._defog_timer is not None
+
+        assert manager.press_defog(device.id) is True
+        assert device.defog_active is False
+        assert device._defog_timer is None     # timer cancelled with the run
+
+        _wait_for_commands(mock, 2)
+        sent = [c for c in mock.received_commands
+                if c in (CMD_DEFOG_ON, CMD_DEFOG_OFF)]
+        assert sent == [CMD_DEFOG_ON, CMD_DEFOG_OFF]
+
+
+def test_defog_exit_line_clears_the_flag(manager):
+    """The firmware ends defog by itself; the UI must follow.
+
+    Dies on: treating DEFOG_EXITED the way AUTO_ACK is treated -- logged and
+    ignored. Defog stops on its own max-run timeout or a stale thermocouple,
+    and nothing else tells the UI, so the button would stay lit over idle
+    hardware until the link dropped.
+    """
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.press_defog(device.id)
+        assert device.defog_active is True
+
+        put(manager, EventType.DEFOG_EXITED, device.id)
+        assert device.defog_active is False
+
+
+def test_defog_timeout_is_its_own_setting_not_cleans(manager):
+    """A 3 minute sequence must not be cleared by the 10s Clean timeout.
+
+    Dies on: `_restart_defog_timer` reading `clean_timeout_s`, which would
+    blank the button two and a half minutes into a run that was still going.
+    """
+    assert manager.config.settings.defog_timeout_s > \
+        manager.config.settings.clean_timeout_s * 10
+
+
+def test_lockout_ends_deice_and_defog_too(manager):
+    """`stop` clears de_ice_flag and de_fog_flag, so the UI must agree.
+
+    Dies on: clearing only Clean and Auto on LOCKOUT. The hardware has
+    already stopped both boards, so a lit Deice or Defog would be reporting
+    an operation that cannot be running.
+    """
+    with MockNPort(MockConfig(clean_duration_s=99)) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.start_deice(device.id)
+        manager.press_defog(device.id)
+        assert device.deice_active is True
+        assert device.defog_active is True
+
+        put(manager, EventType.LOCKOUT, device.id, message="Thermal lockout")
+        assert device.deice_active is False
+        assert device.defog_active is False
+        assert device._deice_timer is None
+        assert device._defog_timer is None
+
+
+def test_removing_a_device_cancels_its_defog_timer(manager):
+    """`_cancel_timers` must know about every timer, not most of them.
+
+    Dies on: leaving `_cancel_defog_timer` out of `_cancel_timers`, which
+    feeds removal, disconnect and shutdown alike. A three-minute timer
+    outliving its device is the longest-lived leak of the set.
+    """
+    with MockNPort(MockConfig()) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.press_defog(device.id)
+        assert manager.scheduler.pending >= 1
+
+        manager.remove_device(device.id)
+        assert manager.scheduler.pending == 0
+        manager.scheduler.fire_all()          # no-op, must not raise
+
+
+def test_link_down_clears_deice_and_defog(manager):
+    with MockNPort(MockConfig(clean_duration_s=99)) as mock:
+        device = _connect_to_mock(manager, mock)
+        manager.start_deice(device.id)
+        manager.press_defog(device.id)
+
+        put(manager, EventType.CONNECTION_LOST, device.id, message="dropped")
+        assert device.deice_active is False
+        assert device.defog_active is False
 
 
 def test_auto_requires_a_connection(manager):

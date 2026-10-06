@@ -106,8 +106,13 @@ def _view(tmp_path, count: int, *, complete: bool = True,
     manager = DeviceManager(config, root.after, root.after_cancel)
     cleaned: list[str] = []
     autoed: list[str] = []
+    # Deice and Defog are wired to no-ops: this helper's 5-tuple is
+    # unpacked by ~40 callers, so widening it to collect them would edit
+    # every one of those to assert nothing new. The tests that do
+    # exercise the two build their own view.
     view = DashboardView(root, manager=manager,
-                         on_clean=cleaned.append, on_auto=autoed.append)
+                         on_clean=cleaned.append, on_auto=autoed.append,
+                         on_deice=lambda i: None, on_defog=lambda i: None)
     view.pack(fill="both", expand=True, padx=theme.PAGE_PAD_X,
               pady=theme.PAGE_PAD_Y)
     if complete:
@@ -712,6 +717,7 @@ def test_a_streamed_build_stops_when_the_shell_is_shutting_down(tmp_path):
     shutting = False
     view = DashboardView(root, manager=manager, on_clean=lambda i: None,
                          on_auto=lambda i: None,
+                         on_deice=lambda i: None, on_defog=lambda i: None,
                          is_shutting_down=lambda: shutting)
     view.pack(fill="both", expand=True)
     try:
@@ -926,7 +932,8 @@ def test_the_build_job_is_scheduled_through_the_host_ctx(tmp_path):
             root.after_cancel(job)
 
     view = DashboardView(root, Ctx(), manager=manager,
-                         on_clean=lambda i: None, on_auto=lambda i: None)
+                         on_clean=lambda i: None, on_auto=lambda i: None,
+                         on_deice=lambda i: None, on_defog=lambda i: None)
     view.pack(fill="both", expand=True)
     try:
         assert scheduled == [theme.DASH_BUILD_INTERVAL_MS]
@@ -955,7 +962,8 @@ def test_ctx_supplies_the_shutdown_predicate(tmp_path):
 
     ctx = Ctx()
     view = DashboardView(root, ctx, manager=manager,
-                         on_clean=lambda i: None, on_auto=lambda i: None)
+                         on_clean=lambda i: None, on_auto=lambda i: None,
+                         on_deice=lambda i: None, on_defog=lambda i: None)
     view.pack(fill="both", expand=True)
     try:
         built = len(view.cards)
@@ -995,7 +1003,8 @@ def test_a_long_device_name_cannot_push_the_status_chip_off_the_card(tmp_path):
     config.load()
     manager = DeviceManager(config, root.after, root.after_cancel)
     view = DashboardView(root, manager=manager, on_clean=lambda i: None,
-                         on_auto=lambda i: None)
+                         on_auto=lambda i: None,
+                         on_deice=lambda i: None, on_defog=lambda i: None)
     view.pack(fill="both", expand=True, padx=theme.PAGE_PAD_X,
               pady=theme.PAGE_PAD_Y)
     view.build_now()

@@ -13,6 +13,8 @@ from emcc.backend.protocol import (
     AUTO_OFF_ACK,
     AUTO_ON_ACK,
     CLEAN_COMPLETE,
+    DEFOG_EXITED,
+    DEICE_COMPLETE,
     CMD_CLEAN,
     LineAssembler,
     MessageKind,
@@ -168,6 +170,64 @@ def test_command_echo_is_not_a_clean_command():
     """The echo contains the command text; it must not be acted on."""
     msg = parse_line("TX to ESV2-1: start_evap_sweep")
     assert msg.kind is MessageKind.COMMAND_ECHO
+
+
+# ---------------------------------------------------------------------------
+# De-ice and Defog completions
+# ---------------------------------------------------------------------------
+
+
+def test_deice_completion_untagged():
+    assert parse_line(DEICE_COMPLETE).kind is MessageKind.DEICE_COMPLETE
+
+
+@pytest.mark.parametrize("channel", [1, 2])
+def test_deice_completion_tagged_carries_channel(channel):
+    msg = parse_line(f"[ESV2-{channel}] {DEICE_COMPLETE}")
+    assert msg.kind is MessageKind.DEICE_COMPLETE
+    assert msg.channel == channel
+
+
+def test_deice_trigger_ack_is_not_a_completion():
+    """`De-ice triggered` and `DeIce Completed` are different lines.
+
+    The firmware spells the two differently -- hyphen and lower case on the
+    trigger (user_commands.c:308), neither on the completion
+    (sequences.c:799). A loose match on "de-ice" would clear the button the
+    instant it was pressed.
+    """
+    assert parse_line("De-ice triggered").kind is not MessageKind.DEICE_COMPLETE
+
+
+def test_defog_exit_line():
+    assert parse_line(DEFOG_EXITED).kind is MessageKind.DEFOG_EXITED
+
+
+@pytest.mark.parametrize("channel", [1, 2])
+def test_defog_exit_tagged_carries_channel(channel):
+    msg = parse_line(f"[ESV2-{channel}] {DEFOG_EXITED}")
+    assert msg.kind is MessageKind.DEFOG_EXITED
+    assert msg.channel == channel
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "I: DeFog sequence started (PID-driven)",
+        "I: DeFog timeout after 180s",
+        "I: Defog PID armed",
+        "I: Defog PID disarmed",
+    ],
+)
+def test_defog_chatter_is_not_an_exit(line):
+    """Defog is talkative. Only the exit line ends the run.
+
+    `DeFog timeout after 180s` is the trap: it precedes the exit line rather
+    than replacing it, so acting on it would clear the button a moment early
+    -- and `PID disarmed` fires on every stop, including ones the sequence
+    recovers from.
+    """
+    assert parse_line(line).kind is not MessageKind.DEFOG_EXITED
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,14 @@ import customtkinter as ctk
 
 from .. import fonts, icons, theme
 from ..backend.device_manager import DeviceState
-from .buttons import AutoButton, CleanButton, ConnectionButton, TempButton
+from .buttons import (
+    AutoButton,
+    CleanButton,
+    ConnectionButton,
+    DefogButton,
+    DeiceButton,
+    TempButton,
+)
 from .canvas_util import scaling
 from .interactive import Interactive
 
@@ -129,6 +136,8 @@ class DeviceCard(ctk.CTkFrame):
         *,
         on_connect: Callable[[str], None],
         on_clean: Callable[[str], None],
+        on_deice: Callable[[str], None],
+        on_defog: Callable[[str], None],
         on_auto: Callable[[str], None],
         on_temperature: Callable[[str], None],
         on_remove: Callable[[str], None],
@@ -152,6 +161,8 @@ class DeviceCard(ctk.CTkFrame):
 
         self._on_connect = on_connect
         self._on_clean = on_clean
+        self._on_deice = on_deice
+        self._on_defog = on_defog
         self._on_auto = on_auto
         self._on_temperature = on_temperature
         self._on_remove = on_remove
@@ -196,6 +207,8 @@ class DeviceCard(ctk.CTkFrame):
         """Re-render every control from the current backend state."""
         self._connection.render()
         self._clean.render()
+        self._deice.render()
+        self._defog.render()
         self._auto.render()
         self._temp.render()
 
@@ -340,6 +353,18 @@ class DeviceCard(ctk.CTkFrame):
             wrap, self.device, lambda: self._on_clean(self.device_id)
         )
         self._clean.pack(side="left")
+
+        # Deice and Defog sit between Clean and Auto, so the row reads
+        # momentary-then-toggle twice over rather than mixing the two kinds.
+        self._deice = DeiceButton(
+            wrap, self.device, lambda: self._on_deice(self.device_id)
+        )
+        self._deice.pack(side="left", padx=(8, 0))  # gap-2
+
+        self._defog = DefogButton(
+            wrap, self.device, lambda: self._on_defog(self.device_id)
+        )
+        self._defog.pack(side="left", padx=(8, 0))  # gap-2
 
         self._auto = AutoButton(
             wrap, self.device, lambda: self._on_auto(self.device_id)

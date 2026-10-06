@@ -26,7 +26,14 @@ from typing import Callable
 from .config_manager import ConfigManager, DeviceConfig
 from .connection_worker import ConnectionWorker
 from .events import ConnectionState, DeviceEvent, EventType
-from .protocol import CMD_AUTO_OFF, CMD_AUTO_ON, CMD_CLEAN
+from .protocol import (
+    CMD_AUTO_OFF,
+    CMD_AUTO_ON,
+    CMD_CLEAN,
+    CMD_DEFOG_OFF,
+    CMD_DEFOG_ON,
+    CMD_DEICE,
+)
 
 logger = logging.getLogger("emcc.device")
 
@@ -51,6 +58,14 @@ class DeviceState:
     connection: ConnectionState = ConnectionState.DISCONNECTED
     auto_enabled: bool = False
     clean_active: bool = False
+    #: One-shot, like `clean_active`: set on the press, cleared by the
+    #: firmware's completion line or by the timeout.
+    deice_active: bool = False
+    #: Running, not enabled: Defog is a ~3 minute sequence, so this is a
+    #: progress flag like `clean_active` rather than a setting like
+    #: `auto_enabled`. Cleared by the firmware's exit line, by the timeout,
+    #: or by the operator pressing again to abort.
+    defog_active: bool = False
     latest_temperature: float | None = None
     temperature_alert: bool = False
     #: Set while the AdapterController is in cooldown lockout. Hardware refuses
@@ -65,6 +80,8 @@ class DeviceState:
 
     #: Timer handles, owned so they can be cancelled on removal or state change.
     _clean_timer: object | None = field(default=None, repr=False)
+    _deice_timer: object | None = field(default=None, repr=False)
+    _defog_timer: object | None = field(default=None, repr=False)
     _auto_reset_timer: object | None = field(default=None, repr=False)
 
     @property
@@ -250,7 +267,9 @@ class DeviceManager:
         if state is not None:
             self._cancel_timers(state)
             state.clean_active = False
+            state.deice_active = False
             state.auto_enabled = False
+            state.defog_active = False
         if worker is not None:
             worker.disconnect()
 
@@ -312,6 +331,109 @@ class DeviceManager:
             state.clean_active = False
             self._notify_ui(device_id)
 
+    def start_deice(self, device_id: str) -> bool:
+        """Issue De-ice and (re)start the visual timeout.
+
+        The Clean path, with one command substituted. Bare, for the same
+        reason: the AdapterController's broadcast branch reaches both boards
+        and runs the pump gating that the `@N` branches skip.
+
+        The timeout borrows `clean_timeout_s` rather than introducing a
+        setting of its own. That is a deliberate stopgap -- a de-ice runs
+        `set_de_ice_loops` iterations and can outlast 10s, in which case the
+        button clears early and the later `DeIce Completed` is absorbed
+        harmlessly by the `if state.deice_active` guard below. The failure is
+        cosmetic in one direction only; a too-long timeout would instead leave
+        the button lit over idle hardware.
+        """
+        state = self._devices.get(device_id)
+        if state is None or not self._send(state, CMD_DEICE):
+            return False
+
+        logger.info("%s De-ice command issued", state.name)
+        state.deice_active = True
+        self._restart_deice_timer(state)
+        return True
+
+    def _restart_deice_timer(self, state: DeviceState) -> None:
+        self._cancel_deice_timer(state)
+        delay_ms = int(self.config.settings.clean_timeout_s * 1000)
+        state._deice_timer = self._schedule(
+            delay_ms, lambda: self._on_deice_timeout(state.id)
+        )
+
+    def _cancel_deice_timer(self, state: DeviceState) -> None:
+        if state._deice_timer is not None:
+            self._cancel(state._deice_timer)
+            state._deice_timer = None
+
+    def _on_deice_timeout(self, device_id: str) -> None:
+        state = self._devices.get(device_id)
+        if state is None:      # removed while the timer was pending
+            return
+        state._deice_timer = None
+        if state.deice_active:
+            logger.info("%s De-ice timed out after %.0fs with no completion",
+                        state.name, self.config.settings.clean_timeout_s)
+            state.deice_active = False
+            self._notify_ui(device_id)
+
+    def press_defog(self, device_id: str) -> bool:
+        """Start Defog, or abort the run already in progress.
+
+        Defog is a ~3 minute sequence, so this is Clean's shape, not Auto's:
+        a press starts it and the button shows it running until the firmware
+        says otherwise.
+
+        The one departure from Clean is what a second press means. Clean
+        re-fires, because re-running a 5 second sweep is cheap and is usually
+        what the operator wanted. Three minutes is not cheap, and a second
+        press on a running Defog is far more likely to mean "stop this" than
+        "start it again" -- so it sends `stop_defog`. That also keeps the
+        pairing PyGUI has, where the same control owns both commands.
+        """
+        state = self._devices.get(device_id)
+        if state is None:
+            return False
+
+        stopping = state.defog_active
+        command = CMD_DEFOG_OFF if stopping else CMD_DEFOG_ON
+        if not self._send(state, command):
+            return False
+
+        logger.info("%s Defog %s", state.name,
+                    "aborted by operator" if stopping else "command issued")
+        if stopping:
+            state.defog_active = False
+            self._cancel_defog_timer(state)
+        else:
+            state.defog_active = True
+            self._restart_defog_timer(state)
+        return True
+
+    def _restart_defog_timer(self, state: DeviceState) -> None:
+        self._cancel_defog_timer(state)
+        delay_ms = int(self.config.settings.defog_timeout_s * 1000)
+        state._defog_timer = self._schedule(
+            delay_ms, lambda: self._on_defog_timeout(state.id)
+        )
+
+    def _cancel_defog_timer(self, state: DeviceState) -> None:
+        if state._defog_timer is not None:
+            self._cancel(state._defog_timer)
+            state._defog_timer = None
+
+    def _on_defog_timeout(self, device_id: str) -> None:
+        state = self._devices.get(device_id)
+        if state is None:      # removed while the timer was pending
+            return
+        state._defog_timer = None
+        if state.defog_active:
+            logger.info("%s Defog timed out after %.0fs with no exit line",
+                        state.name, self.config.settings.defog_timeout_s)
+            state.defog_active = False
+            self._notify_ui(device_id)
+
     def set_auto(self, device_id: str, enabled: bool) -> bool:
         """Toggle Auto.
 
@@ -370,6 +492,8 @@ class DeviceManager:
 
     def _cancel_timers(self, state: DeviceState) -> None:
         self._cancel_clean_timer(state)
+        self._cancel_deice_timer(state)
+        self._cancel_defog_timer(state)
         self._cancel_auto_reset(state)
 
     # ------------------------------------------------------------------
@@ -418,6 +542,13 @@ class DeviceManager:
             state.last_error = ""
             # Auto always starts OFF on a new link, reconnects included.
             state.auto_enabled = False
+            # Defog likewise: a reconnect cannot know whether the sequence
+            # survived, and showing it ON unverified would be worse than
+            # showing it OFF. No stop is sent -- see `_schedule_auto_reset`
+            # for why Auto gets one and this does not: `dis_auto` is
+            # idempotent, `stop_defog` would cancel a defog the operator may
+            # have deliberately left running across a brief drop.
+            state.defog_active = False
             self._schedule_auto_reset(state)
 
         elif kind is EventType.DISCONNECTED:
@@ -461,6 +592,21 @@ class DeviceManager:
                 state.clean_active = False
                 self._cancel_clean_timer(state)
 
+        elif kind is EventType.DEICE_COMPLETE:
+            # First completion from either board clears it, as for Clean.
+            if state.deice_active:
+                state.deice_active = False
+                self._cancel_deice_timer(state)
+
+        elif kind is EventType.DEFOG_EXITED:
+            # Acted on, unlike AUTO_ACK: this is the firmware reporting that
+            # defog stopped, which it does on its own max-run timeout or a
+            # stale thermocouple. Leaving the button lit here would show the
+            # operator a running defog over hardware that had already quit.
+            if state.defog_active:
+                state.defog_active = False
+                self._cancel_defog_timer(state)
+
         elif kind is EventType.AUTO_ACK:
             # Logged by the worker; the UI toggle stays authoritative so an
             # ACK never fights the operator.
@@ -474,6 +620,15 @@ class DeviceManager:
             if state.clean_active:
                 state.clean_active = False
                 self._cancel_clean_timer(state)
+            # `stop` clears de_ice_flag and de_fog_flag and calls Defog_Stop()
+            # (EVS2 user_commands.c kill_task), so De-ice and Defog are over
+            # here for exactly the same reason Clean is.
+            if state.deice_active:
+                state.deice_active = False
+                self._cancel_deice_timer(state)
+            if state.defog_active:
+                state.defog_active = False
+                self._cancel_defog_timer(state)
             state.auto_enabled = False
 
         elif kind is EventType.LOCKOUT_CLEARED:
@@ -489,7 +644,9 @@ class DeviceManager:
         """Common cleanup whenever the link is no longer usable."""
         self._cancel_timers(state)
         state.clean_active = False
+        state.deice_active = False
         state.auto_enabled = False
+        state.defog_active = False
         state.latest_temperature = None
         state.temperature_alert = False
 

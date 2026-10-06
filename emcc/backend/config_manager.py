@@ -48,6 +48,13 @@ class Settings:
     temperature_warning_c: float = 65.0
     connection_timeout_s: float = 3.0
     clean_timeout_s: float = 10.0
+    #: Visual timeout for Defog, which runs far longer than a Clean -- about
+    #: three minutes. A backstop only: the firmware reports the sequence
+    #: leaving its loop ("I: DeFog sequence exited"), and that is what
+    #: normally clears the button. This covers a missed line, and is set
+    #: slightly over three minutes so a normal run is never cut short on
+    #: screen while the hardware is still working.
+    defog_timeout_s: float = 200.0
     temperature_update_interval_s: float = 1.0
     reconnect_attempts: int = 3
     reconnect_interval_s: float = 10.0

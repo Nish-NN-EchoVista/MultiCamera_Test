@@ -255,6 +255,8 @@ class App(ctk.CTk):
             on_add=self._add_device,
             on_connect=self._connect_device,
             on_clean=self._clean_device,
+            on_deice=self._deice_device,
+            on_defog=self._defog_device,
             on_auto=self._toggle_auto,
             on_temperature=self._open_temperature,
             on_remove=self._confirm_remove,
@@ -272,7 +274,7 @@ class App(ctk.CTk):
         host calls `set_devices` and `show` on the object this returns, so
         anything those touch has to be in place before the return, not after.
 
-        The Dashboard takes only `on_clean` and `on_auto` -- its cards carry
+        The Dashboard takes only the four action callbacks -- its cards carry
         no connect, temperature or remove controls -- so the smaller callback
         set is the view's own shape rather than an omission here.
 
@@ -284,6 +286,8 @@ class App(ctk.CTk):
             parent, ctx,
             devices=self.manager.devices,
             on_clean=self._clean_device,
+            on_deice=self._deice_device,
+            on_defog=self._defog_device,
             on_auto=self._toggle_auto,
         )
 
@@ -494,6 +498,12 @@ class App(ctk.CTk):
 
     def _clean_device(self, device_id: str) -> None:
         commands.clean_device(self, device_id)
+
+    def _deice_device(self, device_id: str) -> None:
+        commands.deice_device(self, device_id)
+
+    def _defog_device(self, device_id: str) -> None:
+        commands.defog_device(self, device_id)
 
     def _toggle_auto(self, device_id: str) -> None:
         commands.toggle_auto(self, device_id)

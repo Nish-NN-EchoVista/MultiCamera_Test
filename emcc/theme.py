@@ -418,25 +418,45 @@ DASH_COLS = 5
 #: sharing the viewport equally, so 3 devices give 3 cards at full height with
 #: empty space beneath, not 3 cards stretched over a fifth of the window.
 #
-# Sized so 5 rows fit the default 760px window: 760 - TITLEBAR_H(52)
-# - sub-header band(~71) - 2*PAGE_PAD_Y(32) - footer caption(~20) leaves ~585px
-# for the grid; 5 rows of 112 plus 4 gaps of 10 is 600. Slightly over, so the
-# fifth row needs a ~15px taller window or a maximised one -- measured in
-# tests/test_dashboard_view.py rather than asserted here.
-DASH_CARD_H = 112
+# The default 760px window gives the grid ~585px: 760 - TITLEBAR_H(52)
+# - sub-header band(~71) - 2*PAGE_PAD_Y(32) - footer caption(~20).
+#
+# Was 112, sized for a single Clean/Auto row, which fitted 5 rows in 600px --
+# marginally over the 585, so the fifth row already needed a slightly taller
+# or maximised window.
+#
+# Raised to 134 when Deice and Defog joined them as a 2x2 block.
+#
+# 134 is not a round number, it is the ceiling. The 25-card target in
+# `test_twenty_five_cards_fit_the_default_window` is what sets it: measured
+# on the default window, 134 leaves ~16px of logical headroom over five rows
+# and 138 overflows by 4. A second control row at the old 27px height would
+# have needed 142, which overflows by 24 -- so the row was bought by
+# tightening DASH_CTRL_PAD instead of by giving up the target. See that
+# constant for the arithmetic.
+DASH_CARD_H = 134
 DASH_GAP = 10            # gap-2.5 between grid cells
 DASH_CARD_PAD = 8        # p-2 inside a card
 DASH_ROW_GAP = 3         # gap-0.5 between a card's stacked rows
 DASH_TEMP_H = 34         # the inset temperature panel
 
-#: Clean/Auto padding on a dashboard card, passed to their `pad` argument.
+#: Clean/Deice/Defog/Auto padding on a dashboard card, passed to their `pad`
+#: argument.
 #
-# The list view's px-4 py-2 makes a 33px control; three of those stacked with
-# the header and the temperature panel overflow a 112px card and Tk clips the
-# labels rather than growing the frame. 10/5 gives a 27px control, which is
-# what makes the budget close:
-#   header 28 + temp 34 + actions 27 + padding 16 + gaps 6 = 111
-DASH_CTRL_PAD = (10, 5)
+# The list view's px-4 py-2 makes a 33px control; stacking those with the
+# header and the temperature panel overflows the card and Tk clips the labels
+# rather than growing the frame.
+#
+# Was (10, 5) -> a 27px control, when there was one control row. Two rows of
+# 27 plus a gap needs a 142px card, which breaks the 25-card target. (10, 3)
+# gives 23px, and that is what makes the budget close:
+#   header 28 + temp 34 + actions 23+3+23 + padding 16 + gaps 6 = 133
+# against DASH_CARD_H of 134.
+#
+# 3 is the floor, not a preference: the label is 15px and the frame border
+# takes 2, so 23 is 15 + 2*3 + 2 with nothing spare. Reducing it further
+# clips the text rather than tightening the box.
+DASH_CTRL_PAD = (10, 3)
 
 #: Status dot on a dashboard card. Smaller than the list view's 8px.
 #

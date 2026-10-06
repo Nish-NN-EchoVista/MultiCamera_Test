@@ -56,6 +56,8 @@ class ListView:
                  on_add: Callable[[], None],
                  on_connect: Callable[[str], None],
                  on_clean: Callable[[str], None],
+                 on_deice: Callable[[str], None],
+                 on_defog: Callable[[str], None],
                  on_auto: Callable[[str], None],
                  on_temperature: Callable[[str], None],
                  on_remove: Callable[[str], None],
@@ -76,6 +78,8 @@ class ListView:
         self._on_add = on_add
         self._on_connect = on_connect
         self._on_clean = on_clean
+        self._on_deice = on_deice
+        self._on_defog = on_defog
         self._on_auto = on_auto
         self._on_temperature = on_temperature
         self._on_remove = on_remove
@@ -240,6 +244,8 @@ class ListView:
             self._frame, device,
             on_connect=self._on_connect,
             on_clean=self._on_clean,
+            on_deice=self._on_deice,
+            on_defog=self._on_defog,
             on_auto=self._on_auto,
             on_temperature=self._on_temperature,
             on_remove=self._on_remove,

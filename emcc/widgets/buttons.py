@@ -247,6 +247,74 @@ class CleanButton(ctk.CTkFrame):
         self._interactive.refresh()
 
 
+class DeiceButton(ctk.CTkFrame):
+    """Deice.
+
+    `CleanButton` in every respect except the label and the flag it reads.
+    It is a separate class rather than a `label`/`flag` parameter on
+    CleanButton because that button's docstring documents a behaviour the two
+    do not share -- Clean's icon slot exists because Clean re-fires on a 10s
+    timeout "several times a minute", which de-ice does not do. Collapsing
+    them would put a comment on CleanButton that is true of only one caller.
+
+    The reserved icon slot is kept all the same: Deice sits between Clean and
+    Auto in the list view, so a width change here would shunt Auto sideways
+    exactly as the original note describes.
+    """
+
+    def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
+                 pad: tuple[int, int] = (16, 8)):
+        super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
+        self._device = device
+        self._hovered = False
+        self._icon_visible = False
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
+
+        self._icon = ctk.CTkLabel(row, text="", width=11, height=15)
+        self._icon.pack(side="left", padx=(0, 6))  # gap-1.5, always present
+
+        self._label = ctk.CTkLabel(row, text="Deice", font=fonts.sans(12.5, 600),
+                                   height=15)
+        self._label.pack(side="left")
+
+        self._interactive = Interactive(self, on_hover=self._set_hover,
+                                        on_click=on_click)
+        self.render()
+
+    def _set_hover(self, hovered: bool) -> None:
+        self._hovered = hovered
+        self._paint()
+
+    def _colours(self) -> tuple[str, str, str]:
+        if self._device.deice_active:
+            return (theme.ON_BG_HOVER if self._hovered else theme.ON_BG,
+                    theme.ON_BORDER, theme.ON_TEXT)
+        return (theme.CLEAN_OFF_BG_HOVER if self._hovered else theme.CLEAN_OFF_BG,
+                theme.CLEAN_OFF_BORDER, theme.CLEAN_OFF_TEXT)
+
+    def _paint(self) -> None:
+        fill, border, text = self._colours()
+        _paint_diff(self, self, fg_color=fill, border_color=border)
+        _paint_diff(self, self._label, text_color=text)
+
+        active = self._device.deice_active
+        if active != self._icon_visible:
+            # See CleanButton: hiding uses a transparent image, because
+            # `image=None` is accepted and then not applied.
+            self._icon.configure(
+                image=icons.get("check", text, 11) if active else icons.blank(11)
+            )
+            self._icon_visible = active
+        elif active:
+            self._icon.configure(image=icons.get("check", text, 11))
+
+    def render(self) -> None:
+        self._paint()
+        self._interactive.refresh()
+
+
 class AutoButton(ctk.CTkFrame):
     """Auto.
 
@@ -295,6 +363,76 @@ class AutoButton(ctk.CTkFrame):
     def render(self, animate: bool = True) -> None:
         self._paint()
         self._toggle.set(self._device.auto_enabled, animate=animate)
+        self._interactive.refresh()
+
+
+class DefogButton(ctk.CTkFrame):
+    """Defog.
+
+    A momentary button, not a toggle: Defog is a ~3 minute *sequence*, so the
+    lit state means "running now", the same as Clean and Deice, rather than
+    "switched on" the way Auto's pill does. A pill would invite the reading
+    that defog stays on until switched off, which is not what the hardware
+    does -- it runs its course and exits.
+
+    The active state is therefore not the operator's to hold. It clears when
+    the firmware reports the sequence exited, when the timeout fires, or when
+    the operator presses again to abort -- see `DeviceManager.press_defog`
+    for why a second press stops rather than restarts.
+    """
+
+    def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
+                 pad: tuple[int, int] = (16, 8)):
+        super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
+        self._device = device
+        self._hovered = False
+        self._icon_visible = False
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
+
+        # Reserved permanently, as on Clean and Deice: this button sits in a
+        # row of four, so a width change here moves its neighbours.
+        self._icon = ctk.CTkLabel(row, text="", width=11, height=15)
+        self._icon.pack(side="left", padx=(0, 6))  # gap-1.5
+
+        self._label = ctk.CTkLabel(row, text="Defog", font=fonts.sans(12.5, 600),
+                                   height=15)
+        self._label.pack(side="left")
+
+        self._interactive = Interactive(self, on_hover=self._set_hover,
+                                        on_click=on_click)
+        self.render()
+
+    def _set_hover(self, hovered: bool) -> None:
+        self._hovered = hovered
+        self._paint()
+
+    def _colours(self) -> tuple[str, str, str]:
+        if self._device.defog_active:
+            return (theme.ON_BG_HOVER if self._hovered else theme.ON_BG,
+                    theme.ON_BORDER, theme.ON_TEXT)
+        return (theme.CLEAN_OFF_BG_HOVER if self._hovered else theme.CLEAN_OFF_BG,
+                theme.CLEAN_OFF_BORDER, theme.CLEAN_OFF_TEXT)
+
+    def _paint(self) -> None:
+        fill, border, text = self._colours()
+        _paint_diff(self, self, fg_color=fill, border_color=border)
+        _paint_diff(self, self._label, text_color=text)
+
+        active = self._device.defog_active
+        if active != self._icon_visible:
+            # See CleanButton: hiding uses a transparent image, because
+            # `image=None` is accepted and then not applied.
+            self._icon.configure(
+                image=icons.get("check", text, 11) if active else icons.blank(11)
+            )
+            self._icon_visible = active
+        elif active:
+            self._icon.configure(image=icons.get("check", text, 11))
+
+    def render(self) -> None:
+        self._paint()
         self._interactive.refresh()
 
 

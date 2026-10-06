@@ -53,6 +53,35 @@ def clean_device(app: "App", device_id: str) -> None:
     app._render_device(device_id)
 
 
+def deice_device(app: "App", device_id: str) -> None:
+    """De-ice. `clean_device`'s shape, with its own wording on the refusal."""
+    if not app.manager.start_deice(device_id):
+        device = app.manager.get(device_id)
+        if device is not None and not device.is_connected:
+            app._errors.show_now(
+                device.name, device.ip,
+                "Connect the device before starting a De-ice")
+        return
+    app._render_device(device_id)
+
+
+def defog_device(app: "App", device_id: str) -> None:
+    """Defog. `clean_device`'s shape -- a press starts the sequence.
+
+    A press on a Defog already running aborts it instead. That decision
+    lives in `DeviceManager.press_defog`, not here: it is about what the
+    command means, not about how the UI reports a refusal.
+    """
+    if not app.manager.press_defog(device_id):
+        device = app.manager.get(device_id)
+        if device is not None and not device.is_connected:
+            app._errors.show_now(
+                device.name, device.ip,
+                "Connect the device before starting a Defog")
+        return
+    app._render_device(device_id)
+
+
 def toggle_auto(app: "App", device_id: str) -> None:
     device = app.manager.get(device_id)
     if device is None:

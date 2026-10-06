@@ -423,6 +423,19 @@ class ConnectionWorker(threading.Thread):
                             f" (board {message.channel})" if message.channel else "")
                 self._emit(EventType.CLEAN_COMPLETE, channel=message.channel)
 
+            elif message.kind is MessageKind.DEICE_COMPLETE:
+                logger.info("%s de-ice completed%s", self._tag(),
+                            f" (board {message.channel})" if message.channel else "")
+                self._emit(EventType.DEICE_COMPLETE, channel=message.channel)
+
+            elif message.kind is MessageKind.DEFOG_EXITED:
+                # Info, not warning: a defog ending on its own max-run timer is
+                # the normal case. The firmware prints its reason on the line
+                # before this one, which the log already carries.
+                logger.info("%s defog sequence exited%s", self._tag(),
+                            f" (board {message.channel})" if message.channel else "")
+                self._emit(EventType.DEFOG_EXITED, channel=message.channel)
+
             elif message.kind is MessageKind.AUTO_ON_ACK:
                 logger.info("%s firmware acknowledged AutoClean enabled", self._tag())
                 self._emit(EventType.AUTO_ACK, auto_enabled=True,

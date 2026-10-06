@@ -21,10 +21,17 @@ Two deliberate departures from `DeviceCard`, both about density:
   kept in the list because it explains why the dot is painted once per
   render.
 
-`CleanButton` and `AutoButton` are reused as-is apart from their padding: they
-read `DeviceState` live and hold no state of their own, so the only thing they
-needed was a `pad` argument (`theme.DASH_CTRL_PAD`) to fit a 112px card. Their
-list-view spacing is the default and is unchanged.
+`CleanButton`, `DeiceButton`, `DefogButton` and `AutoButton` are reused as-is
+apart from their padding: they read `DeviceState` live and hold no state of
+their own, so the only thing they needed was a `pad` argument
+(`theme.DASH_CTRL_PAD`). Their list-view spacing is the default and is
+unchanged.
+
+The four are laid out 2x2 -- Clean/Auto on the first row, Deice/Defog on the
+second. That cost a card-height rise from 112 to 134 and a tighter
+`DASH_CTRL_PAD`; both constants carry the arithmetic. The 25-cards-on-one-
+screen target survives, which is what capped the card at 134 rather than the
+142 a second full-height row would have wanted.
 
 The connection *colour* also comes from the list view's own source,
 `connection_view.connection_visual`, so one toggle click cannot change what a
@@ -46,7 +53,7 @@ import customtkinter as ctk
 from .. import fonts, theme
 from ..backend.device_manager import DeviceManager, DeviceState
 from ..backend.events import ConnectionState
-from ..widgets.buttons import AutoButton, CleanButton
+from ..widgets.buttons import AutoButton, CleanButton, DefogButton, DeiceButton
 from ..widgets.canvas_util import scaling
 from ..widgets.connection_view import connection_visual
 
@@ -91,6 +98,8 @@ class DashboardCard(ctk.CTkFrame):
 
     def __init__(self, master, device: DeviceState, *,
                  on_clean: Callable[[str], None],
+                 on_deice: Callable[[str], None],
+                 on_defog: Callable[[str], None],
                  on_auto: Callable[[str], None]):
         super().__init__(master, fg_color=theme.CARD,
                          corner_radius=theme.CARD_RADIUS, border_width=1,
@@ -108,7 +117,7 @@ class DashboardCard(ctk.CTkFrame):
 
         self._build_header(body)
         self._build_temperature(body)
-        self._build_actions(body, on_clean, on_auto)
+        self._build_actions(body, on_clean, on_deice, on_defog, on_auto)
 
         self.render()
 
@@ -255,21 +264,52 @@ class DashboardCard(ctk.CTkFrame):
                                      height=11)
         self._caption.pack(side="right", pady=(4, 0))
 
-    def _build_actions(self, parent, on_clean, on_auto) -> None:
+    def _build_actions(self, parent, on_clean, on_deice, on_defog, on_auto) -> None:
+        """The 2x2 control block: Clean/Auto above, Deice/Defog below.
+
+        Two packed rows rather than a grid. `grid` would need column weights
+        to divide the width evenly, and the card's other sections all pack --
+        mixing the two managers inside one card is a well-known way to get Tk
+        to report a geometry it then does not honour. `fill="x", expand=True`
+        on each button gives the same even split with the manager already in
+        use here.
+
+        The rows are separated by `DASH_ROW_GAP` (3px), the same gap used
+        between buttons, so the four read as one tight block rather than two
+        pairs that happen to be near each other.
+        """
         actions = ctk.CTkFrame(parent, fg_color="transparent")
         actions.pack(fill="x", side="bottom")
 
         device_id = self.device.id
-        self._clean = CleanButton(actions, self.device,
+
+        top = ctk.CTkFrame(actions, fg_color="transparent")
+        top.pack(fill="x")
+
+        self._clean = CleanButton(top, self.device,
                                   lambda: on_clean(device_id),
                                   pad=theme.DASH_CTRL_PAD)
         self._clean.pack(side="left", fill="x", expand=True)
 
-        self._auto = AutoButton(actions, self.device,
+        self._auto = AutoButton(top, self.device,
                                 lambda: on_auto(device_id),
                                 pad=theme.DASH_CTRL_PAD)
         self._auto.pack(side="left", fill="x", expand=True,
                         padx=(theme.DASH_ROW_GAP, 0))
+
+        bottom = ctk.CTkFrame(actions, fg_color="transparent")
+        bottom.pack(fill="x", pady=(theme.DASH_ROW_GAP, 0))
+
+        self._deice = DeiceButton(bottom, self.device,
+                                  lambda: on_deice(device_id),
+                                  pad=theme.DASH_CTRL_PAD)
+        self._deice.pack(side="left", fill="x", expand=True)
+
+        self._defog = DefogButton(bottom, self.device,
+                                  lambda: on_defog(device_id),
+                                  pad=theme.DASH_CTRL_PAD)
+        self._defog.pack(side="left", fill="x", expand=True,
+                         padx=(theme.DASH_ROW_GAP, 0))
 
     # -- painting ---------------------------------------------------------
 
@@ -381,6 +421,10 @@ class DashboardCard(ctk.CTkFrame):
         """
         if self._changed("clean", self.device.clean_active):
             self._clean.render()
+        if self._changed("deice", self.device.deice_active):
+            self._deice.render()
+        if self._changed("defog", self.device.defog_active):
+            self._defog.render()
         if self._changed("auto", self.device.auto_enabled):
             self._auto.render(animate=animate)
 
@@ -470,6 +514,8 @@ class DashboardView(ctk.CTkFrame):
                  manager: DeviceManager | None = None,
                  devices: Sequence[DeviceState] | None = None,
                  on_clean: Callable[[str], None],
+                 on_deice: Callable[[str], None],
+                 on_defog: Callable[[str], None],
                  on_auto: Callable[[str], None],
                  is_shutting_down: Callable[[], bool] | None = None):
         super().__init__(master, fg_color="transparent")
@@ -494,6 +540,8 @@ class DashboardView(ctk.CTkFrame):
             else []
         )
         self._on_clean = on_clean
+        self._on_deice = on_deice
+        self._on_defog = on_defog
         self._on_auto = on_auto
         # Constructed means mounted: the host builds this view lazily, on the
         # first switch to it, so it is on screen by the time it exists.
@@ -647,6 +695,8 @@ class DashboardView(ctk.CTkFrame):
             return False
         device = self._pending.pop(0)
         card = DashboardCard(self._grid, device, on_clean=self._on_clean,
+                             on_deice=self._on_deice,
+                             on_defog=self._on_defog,
                              on_auto=self._on_auto)
         self._cards[device.id] = card
         if device.id in self._order:

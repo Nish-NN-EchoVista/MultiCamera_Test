@@ -50,6 +50,16 @@ CMD_CLEAN = "start_evap_sweep"
 CMD_AUTO_ON = "enableauto"
 CMD_AUTO_OFF = "dis_auto"
 
+#: De-ice and Defog, matching what PyGUI's buttons send
+#: (PyGUI logic/controllers/cleaning_controller.py:186-202).
+#:
+#: The asymmetry is PyGUI's, not an EMCC choice: De-ice is one-shot and ends
+#: on its own, so it has a single command; Defog is a toggle, so it has a stop
+#: as well. EMCC mirrors that -- Deice behaves like Clean, Defog like Auto.
+CMD_DEICE = "start_de_ice"
+CMD_DEFOG_ON = "start_defog"
+CMD_DEFOG_OFF = "stop_defog"
+
 #: EVS2's RX handler dispatches only on CR immediately followed by LF
 #: (uart_buffer.c:44-49), so this terminator is mandatory, not conventional.
 TERMINATOR = "\r\n"
@@ -82,6 +92,21 @@ _CLEAN_NEAR_MISSES = (
 #: EVS2 user_commands.c:265 / :281.
 AUTO_ON_ACK = "AutoClean enabled"
 AUTO_OFF_ACK = "AutoClean disabled"
+
+#: EVS2 sequences.c:799. De-ice's completion, the counterpart to
+#: CLEAN_COMPLETE. Note the spelling: the firmware writes "DeIce", not
+#: "De-ice" as the trigger acknowledgement at user_commands.c:308 does.
+DEICE_COMPLETE = "DeIce Completed"
+
+#: EVS2 sequences.c:698. Emitted whenever the defog sequence leaves its loop,
+#: which is the only signal that it stopped without being told to.
+#:
+#: This matters more than it looks. Defog terminates itself on two conditions
+#: the operator never sees -- `defog_max_run` elapsing (sequences.c:678) and
+#: the thermocouple going stale (defog.c:315) -- so a toggle that trusted only
+#: the operator's last press would sit ON over stopped hardware. That is the
+#: same failure the thermal-lockout handling exists to prevent for Clean.
+DEFOG_EXITED = "I: DeFog sequence exited"
 
 # ---------------------------------------------------------------------------
 # Thermal lockout (AdapterController thermocouple.c:56-72)
@@ -164,6 +189,8 @@ class MessageKind(Enum):
 
     PZT_TEMPERATURE = auto()
     CLEAN_COMPLETE = auto()
+    DEICE_COMPLETE = auto()
+    DEFOG_EXITED = auto()
     AUTO_ON_ACK = auto()
     AUTO_OFF_ACK = auto()
     LOCKOUT_ENTERED = auto()
@@ -233,6 +260,11 @@ def parse_line(line: str) -> ParsedMessage:
         return ParsedMessage(MessageKind.OTHER, raw, payload, channel)
     if payload == CLEAN_COMPLETE:
         return ParsedMessage(MessageKind.CLEAN_COMPLETE, raw, payload, channel)
+
+    if payload == DEICE_COMPLETE:
+        return ParsedMessage(MessageKind.DEICE_COMPLETE, raw, payload, channel)
+    if payload == DEFOG_EXITED:
+        return ParsedMessage(MessageKind.DEFOG_EXITED, raw, payload, channel)
 
     if payload == AUTO_ON_ACK:
         return ParsedMessage(MessageKind.AUTO_ON_ACK, raw, payload, channel)
