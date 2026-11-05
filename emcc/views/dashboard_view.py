@@ -53,7 +53,13 @@ import customtkinter as ctk
 from .. import fonts, theme
 from ..backend.device_manager import DeviceManager, DeviceState
 from ..backend.events import ConnectionState
-from ..widgets.buttons import AutoButton, CleanButton, DefogButton, DeiceButton
+from ..widgets.buttons import (
+    AutoButton,
+    CleanButton,
+    DefogButton,
+    DeiceButton,
+    LogButton,
+)
 from ..widgets.canvas_util import scaling
 from ..widgets.connection_view import connection_visual
 
@@ -100,7 +106,8 @@ class DashboardCard(ctk.CTkFrame):
                  on_clean: Callable[[str], None],
                  on_deice: Callable[[str], None],
                  on_defog: Callable[[str], None],
-                 on_auto: Callable[[str], None]):
+                 on_auto: Callable[[str], None],
+                 on_log: Callable[[str], None] | None = None):
         super().__init__(master, fg_color=theme.CARD,
                          corner_radius=theme.CARD_RADIUS, border_width=1,
                          border_color=theme.BORDER_CARD,
@@ -116,7 +123,7 @@ class DashboardCard(ctk.CTkFrame):
                   pady=theme.DASH_CARD_PAD)
 
         self._build_header(body)
-        self._build_temperature(body)
+        self._build_temperature(body, on_log or (lambda _device_id: None))
         self._build_actions(body, on_clean, on_deice, on_defog, on_auto)
 
         self.render()
@@ -220,7 +227,7 @@ class DashboardCard(ctk.CTkFrame):
         if text != self._name.cget("text"):
             self._name.configure(text=text)
 
-    def _build_temperature(self, parent) -> None:
+    def _build_temperature(self, parent, on_log: Callable[[str], None]) -> None:
         self._panel = ctk.CTkFrame(parent, fg_color=theme.INPUT_BG,
                                    corner_radius=theme.CTRL_RADIUS,
                                    border_width=1,
@@ -230,6 +237,15 @@ class DashboardCard(ctk.CTkFrame):
 
         inner = ctk.CTkFrame(self._panel, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=8, pady=4)
+
+        # The Log button sits at the right of the temperature panel, where
+        # the operator's mock-up put it. Packed FIRST so it claims its width
+        # and the readout gets what is left -- the same reason the status
+        # chip is packed first in the header.
+        device_id = self.device.id
+        self._log = LogButton(inner, self.device, lambda: on_log(device_id),
+                              pad=theme.DASH_CTRL_PAD, width=theme.DASH_LOG_W)
+        self._log.pack(side="right", padx=(6, 0))
 
         top = ctk.CTkFrame(inner, fg_color="transparent")
         top.pack(fill="x")
@@ -267,49 +283,55 @@ class DashboardCard(ctk.CTkFrame):
     def _build_actions(self, parent, on_clean, on_deice, on_defog, on_auto) -> None:
         """The 2x2 control block: Clean/Auto above, Deice/Defog below.
 
-        Two packed rows rather than a grid. `grid` would need column weights
-        to divide the width evenly, and the card's other sections all pack --
-        mixing the two managers inside one card is a well-known way to get Tk
-        to report a geometry it then does not honour. `fill="x", expand=True`
-        on each button gives the same even split with the manager already in
-        use here.
+        A grid with two `uniform` columns, so all four buttons are exactly
+        the same size and every label sits in the middle of its button.
 
-        The rows are separated by `DASH_ROW_GAP` (3px), the same gap used
-        between buttons, so the four read as one tight block rather than two
-        pairs that happen to be near each other.
+        It was two packed rows with `fill="x", expand=True`, which looked
+        even and was not: `expand` shares out only the *spare* width, so each
+        button kept its own natural width plus an equal share -- Auto (a pill
+        and a word) came out wider than Clean, Deice narrower than Defog, and
+        no label was centred. The operator circled exactly that on
+        2026-11-05.
+
+        `grid` is used inside `actions` only. Every widget in it is gridded
+        and its parent packs it, so no one container mixes the two managers --
+        the hazard the packed version was avoiding.
+
+        The gap is split half-and-half between neighbours rather than all on
+        one side, so both columns (and both rows) lose the same width to it.
         """
         actions = ctk.CTkFrame(parent, fg_color="transparent")
         actions.pack(fill="x", side="bottom")
+        actions.grid_columnconfigure((0, 1), weight=1, uniform="actions")
+        actions.grid_rowconfigure((0, 1), uniform="actions")
 
         device_id = self.device.id
+        half = theme.DASH_ROW_GAP / 2
+        width = theme.DASH_BTN_MIN_W
 
-        top = ctk.CTkFrame(actions, fg_color="transparent")
-        top.pack(fill="x")
-
-        self._clean = CleanButton(top, self.device,
+        self._clean = CleanButton(actions, self.device,
                                   lambda: on_clean(device_id),
-                                  pad=theme.DASH_CTRL_PAD)
-        self._clean.pack(side="left", fill="x", expand=True)
+                                  pad=theme.DASH_CTRL_PAD, width=width)
+        self._clean.grid(row=0, column=0, sticky="nsew",
+                         padx=(0, half), pady=(0, half))
 
-        self._auto = AutoButton(top, self.device,
+        self._auto = AutoButton(actions, self.device,
                                 lambda: on_auto(device_id),
-                                pad=theme.DASH_CTRL_PAD)
-        self._auto.pack(side="left", fill="x", expand=True,
-                        padx=(theme.DASH_ROW_GAP, 0))
+                                pad=theme.DASH_CTRL_PAD, width=width)
+        self._auto.grid(row=0, column=1, sticky="nsew",
+                        padx=(half, 0), pady=(0, half))
 
-        bottom = ctk.CTkFrame(actions, fg_color="transparent")
-        bottom.pack(fill="x", pady=(theme.DASH_ROW_GAP, 0))
-
-        self._deice = DeiceButton(bottom, self.device,
+        self._deice = DeiceButton(actions, self.device,
                                   lambda: on_deice(device_id),
-                                  pad=theme.DASH_CTRL_PAD)
-        self._deice.pack(side="left", fill="x", expand=True)
+                                  pad=theme.DASH_CTRL_PAD, width=width)
+        self._deice.grid(row=1, column=0, sticky="nsew",
+                         padx=(0, half), pady=(half, 0))
 
-        self._defog = DefogButton(bottom, self.device,
+        self._defog = DefogButton(actions, self.device,
                                   lambda: on_defog(device_id),
-                                  pad=theme.DASH_CTRL_PAD)
-        self._defog.pack(side="left", fill="x", expand=True,
-                         padx=(theme.DASH_ROW_GAP, 0))
+                                  pad=theme.DASH_CTRL_PAD, width=width)
+        self._defog.grid(row=1, column=1, sticky="nsew",
+                         padx=(half, 0), pady=(half, 0))
 
     # -- painting ---------------------------------------------------------
 
@@ -427,6 +449,8 @@ class DashboardCard(ctk.CTkFrame):
             self._defog.render()
         if self._changed("auto", self.device.auto_enabled):
             self._auto.render(animate=animate)
+        if self._changed("log", self.device.logging_enabled):
+            self._log.render()
 
 
 def device_name(device: DeviceState) -> str:
@@ -517,6 +541,7 @@ class DashboardView(ctk.CTkFrame):
                  on_deice: Callable[[str], None],
                  on_defog: Callable[[str], None],
                  on_auto: Callable[[str], None],
+                 on_log: Callable[[str], None] | None = None,
                  is_shutting_down: Callable[[], bool] | None = None):
         super().__init__(master, fg_color="transparent")
         # `ctx` is what the host owes a view: `is_shutting_down`, `after` and
@@ -543,6 +568,7 @@ class DashboardView(ctk.CTkFrame):
         self._on_deice = on_deice
         self._on_defog = on_defog
         self._on_auto = on_auto
+        self._on_log = on_log
         # Constructed means mounted: the host builds this view lazily, on the
         # first switch to it, so it is on screen by the time it exists.
         # `hide()` is what takes it off.
@@ -697,7 +723,8 @@ class DashboardView(ctk.CTkFrame):
         card = DashboardCard(self._grid, device, on_clean=self._on_clean,
                              on_deice=self._on_deice,
                              on_defog=self._on_defog,
-                             on_auto=self._on_auto)
+                             on_auto=self._on_auto,
+                             on_log=self._on_log)
         self._cards[device.id] = card
         if device.id in self._order:
             self._place(card, self._order.index(device.id))

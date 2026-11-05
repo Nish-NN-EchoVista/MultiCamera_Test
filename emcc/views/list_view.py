@@ -63,6 +63,7 @@ class ListView:
                  on_remove: Callable[[str], None],
                  on_rename: Callable[[str, str], object],
                  on_ip_change: Callable[[str, str], object],
+                 on_log: Callable[[str], None] | None = None,
                  on_changed: Callable[[], None] | None = None,
                  is_shutting_down: Callable[[], bool] | None = None) -> None:
         self._ctx = ctx if ctx is not None else StandaloneCtx(master)
@@ -85,6 +86,7 @@ class ListView:
         self._on_remove = on_remove
         self._on_rename = on_rename
         self._on_ip_change = on_ip_change
+        self._on_log = on_log
         #: Called wherever `_rebuild`/`_build_remaining` called
         #: `_refresh_chrome`, so the shell still refreshes at the same points.
         self._on_changed = on_changed or (lambda: None)
@@ -251,6 +253,7 @@ class ListView:
             on_remove=self._on_remove,
             on_rename=self._on_rename,
             on_ip_change=self._on_ip_change,
+            on_log=self._on_log,
             label_offset=label_offset,
         )
         card.pack(fill="x", pady=(0 if first else theme.CARD_GAP, 0),

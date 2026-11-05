@@ -25,6 +25,9 @@ _FILE_FORMAT = "%(asctime)s %(levelname)-7s %(name)-28s %(message)s"
 _CONSOLE_FORMAT = "%(levelname)-7s %(message)s"
 
 _configured = False
+#: The folder `setup_logging` chose. Device logs live under it, so a
+#: `--log-dir` on the command line moves both together.
+_directory: Path = LOG_DIR
 
 
 def setup_logging(
@@ -38,11 +41,12 @@ def setup_logging(
     console logging only, because losing logs is much better than refusing to
     start a control application.
     """
-    global _configured
+    global _configured, _directory
     if _configured:
         return LOG_FILE
 
     directory = log_dir if log_dir is not None else LOG_DIR
+    _directory = Path(directory)
     root = logging.getLogger()
     root.setLevel(level)
     for handler in list(root.handlers):
@@ -111,6 +115,11 @@ def setup_logging(
 
     _configured = True
     return path
+
+
+def log_directory() -> Path:
+    """The application log folder; device logs go in its `devices` subfolder."""
+    return _directory
 
 
 def shutdown_logging() -> None:

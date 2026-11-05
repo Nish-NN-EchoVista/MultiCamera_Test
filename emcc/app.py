@@ -31,9 +31,10 @@ import customtkinter as ctk
 
 from . import fonts, icons, theme
 from . import splash as splash_module
+from .backend.capture import DeviceCapture, LogLevel
 from .backend.config_manager import ConfigManager
 from .backend.device_manager import DeviceManager, DeviceState
-from .backend.logging_setup import shutdown_logging
+from .backend.logging_setup import log_directory, shutdown_logging
 from .shell import chrome, commands, handoff, pump as pump_module
 from .shell.subheader import SubHeader
 from .splash import LaunchSplash
@@ -42,6 +43,7 @@ from .views.host import ViewHost
 from .views.list_view import CARD_BUILD_INTERVAL_MS, INITIAL_CARDS, ListView
 from .widgets.add_device import AddDeviceButton
 from .views.dashboard_view import DashboardView
+from .views.settings_view import SettingsView
 from .widgets.device_card import DeviceCard
 from .widgets.dialogs import ConfirmDialog, ErrorReporter
 from .widgets.title_bar import TitleBar
@@ -65,7 +67,8 @@ _FACADE_NAMES: frozenset[str] = frozenset({
     "_clean_device", "_confirm_remove", "_connect_device", "_hint",
     "_list", "_logo", "_order", "_pending_devices", "_pump",
     "_refresh_chrome", "_remove_device", "_render_device",
-    "_scroll_to_end", "_shutting_down", "_toggle_auto",
+    "_scroll_to_end", "_set_log_level", "_shutting_down",
+    "_toggle_auto", "_toggle_logging",
     "config_manager", "manager", "shutdown", "title_bar",
     # Added by the Dashboard mount. `views` is the host, `_sub` the
     # sub-header builder, `_switch_view` the toggle's adapter -- all three
@@ -119,6 +122,19 @@ class App(ctk.CTk):
         else:
             self.config_manager.load()
 
+        # Device logs, fed by the connection workers and switched per device
+        # by the Log buttons. `start()` queues crash recovery and the prune
+        # of old logs on a short-lived background thread; with every Log
+        # button off, no capture thread runs at all.
+        settings = self.config_manager.settings
+        self.capture = DeviceCapture(
+            log_directory() / "devices",
+            level=settings.log_level,
+            retention_days=settings.log_retention_days,
+            max_bytes=int(settings.log_max_gb * 1024 ** 3),
+        )
+        self.capture.start()
+
         # DeviceManager owns the timers but not Tk: it gets a scheduler.
         # Composed deliberately: an event means repaint *and* announce.
         # `_render_device` alone no longer announces -- see shell/pump.py.
@@ -134,6 +150,7 @@ class App(ctk.CTk):
             schedule=lambda delay_ms, fn: self.after(delay_ms, fn),
             cancel=self.after_cancel,
             on_device_changed=self._on_device_changed,
+            capture=self.capture,
         )
 
         #: Set by the `list` factory before the host sends `set_devices`,
@@ -236,6 +253,7 @@ class App(ctk.CTk):
                               on_shown=self._refresh_chrome)
         self.views.register("list", self._make_list_view)
         self.views.register("dashboard", self._make_dashboard_view)
+        self.views.register("settings", self._make_settings_view)
         self.views.show("list", self.manager.devices)
 
     def _make_list_view(self, parent, ctx) -> ListView:
@@ -262,6 +280,7 @@ class App(ctk.CTk):
             on_remove=self._confirm_remove,
             on_rename=self.manager.rename_device,
             on_ip_change=self.manager.set_ip,
+            on_log=self._toggle_logging,
             on_changed=self._refresh_chrome,
             is_shutting_down=lambda: self._shutting_down,
         )
@@ -289,6 +308,25 @@ class App(ctk.CTk):
             on_deice=self._deice_device,
             on_defog=self._defog_device,
             on_auto=self._toggle_auto,
+            on_log=self._toggle_logging,
+        )
+
+    def _make_settings_view(self, parent, ctx) -> SettingsView:
+        """Build the Settings view: the device log level and folder.
+
+        Takes the level and folder rather than the manager, and reports a
+        new level through `_set_log_level` -- the same shape as the other
+        views, which render state and forward intent.
+        """
+        settings = self.config_manager.settings
+        return SettingsView(
+            parent, ctx,
+            level=self.manager.log_level,
+            log_root=self.capture.root,
+            retention_days=settings.log_retention_days,
+            max_gb=settings.log_max_gb,
+            on_level=self._set_log_level,
+            devices=self.manager.devices,
         )
 
     def _switch_view(self, name: str) -> None:
@@ -507,6 +545,22 @@ class App(ctk.CTk):
 
     def _toggle_auto(self, device_id: str) -> None:
         commands.toggle_auto(self, device_id)
+
+    def _toggle_logging(self, device_id: str) -> None:
+        """A device's Log button, from either view."""
+        self.manager.toggle_logging(device_id)
+        # The list card through the shell's path, and the active view too
+        # when that is not the list -- `_render_device` repaints only the
+        # list's cards, so a Log press on the Dashboard would otherwise not
+        # light up until something else repainted the card.
+        self._render_device(device_id)
+        if self.views.active_name != "list":
+            self.views.render_device(device_id)
+
+    def _set_log_level(self, level: LogLevel) -> None:
+        """The Settings view's level choice: save it and apply it."""
+        self.manager.set_log_level(level)
+        self._refresh_chrome()
 
     def _open_temperature(self, device_id: str) -> None:
         commands.open_temperature(self, device_id)

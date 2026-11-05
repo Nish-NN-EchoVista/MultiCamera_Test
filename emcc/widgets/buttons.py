@@ -1,4 +1,4 @@
-"""The four interactive controls inside a device card.
+"""The interactive controls inside a device card.
 
 Each is a frame + children rather than a CTkButton, because the design's exact
 icon/label gaps (gap-1.5, gap-2, gap-2.5) and the connection button's leading
@@ -103,6 +103,55 @@ def _paint_diff(owner, widget, **props) -> None:
             cache[(widget, k)] = v
 
 
+#: Icon slot plus its gap (11 + gap-1.5), mirrored after the label.
+_ICON_SLOT = 11 + 6
+_LABEL_H = 15
+
+
+def _face(frame: ctk.CTkFrame, pad: tuple[int, int], width: int | None,
+          content_h: int) -> ctk.CTkFrame:
+    """The row that holds a control's content, sized and centred.
+
+    Without `width` the control is exactly as wide as its content plus `pad`,
+    which is how every control was built before the Log button arrived.
+
+    With `width` the control has that width -- the dashboard's grid may
+    stretch it further -- and its content is *centred*. That is what lets a
+    row of different words (Clean, Deice, Defog, Log) sit in buttons of one
+    size with every label in the middle, which natural widths could not do:
+    each button was its word plus padding, so no two matched. The height is
+    the content's plus `pad`, so a fixed-width control is exactly as tall as
+    a natural one.
+    """
+    row = ctk.CTkFrame(frame, fg_color="transparent")
+    if width is None:
+        row.pack(padx=pad[0], pady=pad[1])
+    else:
+        # +2 for the 1px border, top and bottom.
+        frame.configure(width=width, height=content_h + 2 * pad[1] + 2)
+        frame.pack_propagate(False)
+        row.place(relx=0.5, rely=0.5, anchor="center")
+    return row
+
+
+def _icon_and_label(row: ctk.CTkFrame, text: str) -> tuple[ctk.CTkLabel, ctk.CTkLabel]:
+    """The tick slot, the word, and a blank the size of the tick slot.
+
+    The tick's slot is reserved permanently (see `CleanButton`), which put
+    every label 8.5px right of centre when idle. The blank after the label
+    mirrors it, so the *word* is what sits at the centre whether the tick is
+    showing or not, and showing it moves nothing.
+    """
+    icon = ctk.CTkLabel(row, text="", width=11, height=_LABEL_H)
+    icon.pack(side="left", padx=(0, 6))  # gap-1.5, always present
+    label = ctk.CTkLabel(row, text=text, font=fonts.sans(12.5, 600),
+                         height=_LABEL_H)
+    label.pack(side="left")
+    ctk.CTkFrame(row, fg_color="transparent", width=_ICON_SLOT,
+                 height=_LABEL_H).pack(side="left")
+    return icon, label
+
+
 class ConnectionButton(ctk.CTkFrame):
     """Connect / Connecting / Connected / Reconnecting / Reconnect.
 
@@ -190,24 +239,18 @@ class CleanButton(ctk.CTkFrame):
     """
 
     def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
-                 pad: tuple[int, int] = (16, 8)):
+                 pad: tuple[int, int] = (16, 8), width: int | None = None):
         super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
         self._device = device
         self._hovered = False
         self._icon_visible = False
 
-        # `pad` is the only geometry the caller may vary: the dashboard fits
-        # this control into a 112px card and cannot afford px-4 py-2. The
-        # default is the list view's spacing, unchanged.
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
-
-        self._icon = ctk.CTkLabel(row, text="", width=11, height=15)
-        self._icon.pack(side="left", padx=(0, 6))  # gap-1.5, always present
-
-        self._label = ctk.CTkLabel(row, text="Clean", font=fonts.sans(12.5, 600),
-                                   height=15)
-        self._label.pack(side="left")
+        # `pad` and `width` are the only geometry the caller may vary: the
+        # dashboard fits this control into a 112px card and cannot afford
+        # px-4 py-2, and both views give their action buttons one shared
+        # width so the labels line up (see `_face`).
+        row = _face(self, pad, width, _LABEL_H)
+        self._icon, self._label = _icon_and_label(row, "Clean")
 
         self._interactive = Interactive(self, on_hover=self._set_hover,
                                         on_click=on_click)
@@ -263,21 +306,14 @@ class DeiceButton(ctk.CTkFrame):
     """
 
     def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
-                 pad: tuple[int, int] = (16, 8)):
+                 pad: tuple[int, int] = (16, 8), width: int | None = None):
         super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
         self._device = device
         self._hovered = False
         self._icon_visible = False
 
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
-
-        self._icon = ctk.CTkLabel(row, text="", width=11, height=15)
-        self._icon.pack(side="left", padx=(0, 6))  # gap-1.5, always present
-
-        self._label = ctk.CTkLabel(row, text="Deice", font=fonts.sans(12.5, 600),
-                                   height=15)
-        self._label.pack(side="left")
+        row = _face(self, pad, width, _LABEL_H)
+        self._icon, self._label = _icon_and_label(row, "Deice")
 
         self._interactive = Interactive(self, on_hover=self._set_hover,
                                         on_click=on_click)
@@ -323,14 +359,14 @@ class AutoButton(ctk.CTkFrame):
     """
 
     def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
-                 pad: tuple[int, int] = (16, 8)):
+                 pad: tuple[int, int] = (16, 8), width: int | None = None):
         super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
         self._device = device
         self._hovered = False
 
-        # See CleanButton: `pad` exists for the dashboard's compact card.
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
+        # See CleanButton: `pad` exists for the dashboard's compact card,
+        # `width` for the dashboard's even grid.
+        row = _face(self, pad, width, 16)
 
         self._toggle = AutoToggle(row, on=device.auto_enabled)
         self._toggle.pack(side="left")
@@ -382,23 +418,17 @@ class DefogButton(ctk.CTkFrame):
     """
 
     def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
-                 pad: tuple[int, int] = (16, 8)):
+                 pad: tuple[int, int] = (16, 8), width: int | None = None):
         super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
         self._device = device
         self._hovered = False
         self._icon_visible = False
 
-        row = ctk.CTkFrame(self, fg_color="transparent")
-        row.pack(padx=pad[0], pady=pad[1])  # px-4 py-2
-
-        # Reserved permanently, as on Clean and Deice: this button sits in a
-        # row of four, so a width change here moves its neighbours.
-        self._icon = ctk.CTkLabel(row, text="", width=11, height=15)
-        self._icon.pack(side="left", padx=(0, 6))  # gap-1.5
-
-        self._label = ctk.CTkLabel(row, text="Defog", font=fonts.sans(12.5, 600),
-                                   height=15)
-        self._label.pack(side="left")
+        # The tick slot is reserved permanently, as on Clean and Deice: this
+        # button sits in a row of five, so a width change here would move its
+        # neighbours.
+        row = _face(self, pad, width, _LABEL_H)
+        self._icon, self._label = _icon_and_label(row, "Defog")
 
         self._interactive = Interactive(self, on_hover=self._set_hover,
                                         on_click=on_click)
@@ -421,6 +451,64 @@ class DefogButton(ctk.CTkFrame):
         _paint_diff(self, self._label, text_color=text)
 
         active = self._device.defog_active
+        if active != self._icon_visible:
+            # See CleanButton: hiding uses a transparent image, because
+            # `image=None` is accepted and then not applied.
+            self._icon.configure(
+                image=icons.get("check", text, 11) if active else icons.blank(11)
+            )
+            self._icon_visible = active
+        elif active:
+            self._icon.configure(image=icons.get("check", text, 11))
+
+    def render(self) -> None:
+        self._paint()
+        self._interactive.refresh()
+
+
+class LogButton(ctk.CTkFrame):
+    """Log: whether this device's lines are being written to its log folder.
+
+    A switch, unlike Clean, Deice and Defog: lit means "being logged now" and
+    it stays lit until pressed again. It is drawn like them rather than like
+    Auto's pill because the operator asked for it in the same font and size
+    as the other action buttons, and the green fill with a tick already reads
+    as "on" in this row.
+
+    It never starts lit: logging is not remembered across restarts.
+    """
+
+    def __init__(self, master, device: DeviceState, on_click: Callable[[], None],
+                 pad: tuple[int, int] = (16, 8), width: int | None = None):
+        super().__init__(master, corner_radius=theme.CTRL_RADIUS, border_width=1)
+        self._device = device
+        self._hovered = False
+        self._icon_visible = False
+
+        row = _face(self, pad, width, _LABEL_H)
+        self._icon, self._label = _icon_and_label(row, "Log")
+
+        self._interactive = Interactive(self, on_hover=self._set_hover,
+                                        on_click=on_click)
+        self.render()
+
+    def _set_hover(self, hovered: bool) -> None:
+        self._hovered = hovered
+        self._paint()
+
+    def _colours(self) -> tuple[str, str, str]:
+        if self._device.logging_enabled:
+            return (theme.ON_BG_HOVER if self._hovered else theme.ON_BG,
+                    theme.ON_BORDER, theme.ON_TEXT)
+        return (theme.CLEAN_OFF_BG_HOVER if self._hovered else theme.CLEAN_OFF_BG,
+                theme.CLEAN_OFF_BORDER, theme.CLEAN_OFF_TEXT)
+
+    def _paint(self) -> None:
+        fill, border, text = self._colours()
+        _paint_diff(self, self, fg_color=fill, border_color=border)
+        _paint_diff(self, self._label, text_color=text)
+
+        active = self._device.logging_enabled
         if active != self._icon_visible:
             # See CleanButton: hiding uses a transparent image, because
             # `image=None` is accepted and then not applied.

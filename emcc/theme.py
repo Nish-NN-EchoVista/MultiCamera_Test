@@ -361,6 +361,12 @@ COL_NAME = 188           # w-[188px]
 COL_IP = 176             # w-[176px]
 COL_CONN = 162           # w-[162px]
 COL_TEMP = 148           # w-[148px]
+#: One width for every worded action button in the list (Clean, Deice, Defog,
+#: Log), so each word sits centred and the buttons line up down the list.
+#: The widest word plus the tick slot either side (see buttons._face) is
+#: ~71px, so this keeps px-4 of clear space around it.
+ACTION_W = 104
+ACTION_GAP = 8           # gap-2
 
 #: Banner wordmark height.
 #
@@ -392,9 +398,15 @@ SCROLL_THRESHOLD = 4     # devices.length >= 4
 # spec requires no hard maximum. Scaling is a performance concern, not a
 # counted one -- see multicameraUI_masterplan.md R-1.
 
-WINDOW_W = 1280
+#: Widened from 1280 x 1180 for the Log button (operator's choice,
+#: 2026-11-05, over narrower buttons or columns). MEASURED: the five action
+#: buttons need 544 logical px, and the Actions column gets the window width
+#: minus ~805 px of fixed columns, separators and padding. So 1370 is the
+#: narrowest window that fits them with 8 px either side; at the old 1280 the
+#: column got 475 and the Temperature column was pushed off the window.
+WINDOW_W = 1440
 WINDOW_H = 760
-WINDOW_MIN_W = 1180
+WINDOW_MIN_W = 1370
 WINDOW_MIN_H = 420
 
 APP_VERSION = "v2.4.1"
@@ -457,6 +469,12 @@ DASH_TEMP_H = 34         # the inset temperature panel
 # takes 2, so 23 is 15 + 2*3 + 2 with nothing spare. Reducing it further
 # clips the text rather than tightening the box.
 DASH_CTRL_PAD = (10, 3)
+#: The dashboard's 2x2 buttons take their width from the card's grid; this is
+#: only the floor they may not be squeezed below.
+DASH_BTN_MIN_W = 40
+#: The Log button in the temperature panel: "Log" with the tick slot either
+#: side (~56px) plus DASH_CTRL_PAD.
+DASH_LOG_W = 76
 
 #: Status dot on a dashboard card. Smaller than the list view's 8px.
 #
@@ -472,6 +490,7 @@ DASH_DOT = 6
 LIST_SUBHEAD = "DEVICE CONTROLLERS"
 
 DASH_SUBHEAD = "DASHBOARD OVERVIEW"
+SETTINGS_SUBHEAD = "SETTINGS"
 DASH_LABEL = "DEVICE"
 
 #: Temperature caption beneath the value.

@@ -38,6 +38,7 @@ import socket
 import threading
 import time
 
+from .capture.levels import ERROR, INFO, WARNING
 from .config_manager import Settings
 from .events import ConnectionState, DeviceEvent, EventType
 from .protocol import LineAssembler, MessageKind, encode_command, parse_line
@@ -64,11 +65,18 @@ class ConnectionWorker(threading.Thread):
         ip_address: str,
         settings: Settings,
         events: "queue.Queue[DeviceEvent]",
+        capture=None,
     ):
         super().__init__(name=f"emcc-conn-{device_name}", daemon=False)
         self.device_id = device_id
         self.ip_address = ip_address
         self.settings = settings
+        #: The device log (`capture.DeviceCapture`), or None. Every line
+        #: received, command sent and connection event is offered to it; it
+        #: keeps them only while this device's Log button is on, at the cost
+        #: of one dict lookup otherwise. Never blocks: it appends to a queue
+        #: that its own writer thread drains.
+        self._capture = capture
 
         self._device_name = device_name
         self._events = events
@@ -199,6 +207,13 @@ class ConnectionWorker(threading.Thread):
     def _tag(self) -> str:
         return f"{self._device_name} [{self.ip_address}]"
 
+    def _log(self, text: str, severity: str = INFO, *,
+             context: bool = False) -> None:
+        """Offer a connection event to the device log."""
+        if self._capture is not None:
+            self._capture.record_event(self.device_id, text, severity,
+                                       context=context)
+
     # ------------------------------------------------------------------
     # Thread body
     # ------------------------------------------------------------------
@@ -209,6 +224,7 @@ class ConnectionWorker(threading.Thread):
         except Exception:
             # A worker must never take the app down.
             logger.exception("%s worker crashed", self._tag())
+            self._log("Internal error in the connection; see emcc.log", ERROR)
             self._set_state(ConnectionState.ERROR)
             self._emit(EventType.ERROR, message="Internal error; see log")
         finally:
@@ -225,6 +241,7 @@ class ConnectionWorker(threading.Thread):
         if error is not None:
             self._set_state(ConnectionState.ERROR)
             logger.error("%s connection failed: %s", self._tag(), error)
+            self._log(f"Connection failed: {error}", ERROR)
             self._emit(EventType.CONNECTION_FAILED, message=_friendly(error))
             return
 
@@ -238,17 +255,21 @@ class ConnectionWorker(threading.Thread):
                 return
             if self._manual_disconnect.is_set():
                 logger.info("%s disconnected by operator", self._tag())
+                self._log("Disconnected by operator", context=True)
                 self._emit(EventType.DISCONNECTED)
                 self._set_state(ConnectionState.DISCONNECTED)
                 return
 
             logger.warning("%s connection lost: %s", self._tag(), dropped_reason)
+            self._log(f"Connection lost: {dropped_reason}", WARNING)
             self._emit(EventType.CONNECTION_LOST, message=_friendly(dropped_reason))
 
             if not self._reconnect():
                 self._set_state(ConnectionState.ERROR)
                 logger.error("%s automatic reconnection failed after %d attempts",
                              self._tag(), self.settings.reconnect_attempts)
+                self._log(f"Automatic reconnection failed after "
+                          f"{self.settings.reconnect_attempts} attempts", ERROR)
                 self._emit(
                     EventType.RECONNECT_FAILED,
                     message=(f"Automatic reconnection failed after "
@@ -313,6 +334,8 @@ class ConnectionWorker(threading.Thread):
         self._last_temp_emit = 0.0
         self._last_alert = None
         logger.info("%s connected", self._tag())
+        self._log(f"Connected to {self.ip_address}:{self.settings.tcp_port}"
+                  if first else "Reconnected", context=True)
         self._emit(EventType.CONNECTED)
 
     def _reconnect(self) -> bool:
@@ -330,6 +353,7 @@ class ConnectionWorker(threading.Thread):
             self._set_state(ConnectionState.RECONNECTING)
             self._emit(EventType.RECONNECTING, attempt=attempt, total_attempts=total)
             logger.info("%s reconnect attempt %d/%d", self._tag(), attempt, total)
+            self._log(f"Reconnect attempt {attempt}/{total}")
 
             error = self._open_socket()
             if error is None:
@@ -339,6 +363,8 @@ class ConnectionWorker(threading.Thread):
 
             logger.warning("%s reconnect attempt %d/%d failed: %s",
                            self._tag(), attempt, total, error)
+            self._log(f"Reconnect attempt {attempt}/{total} failed: {error}",
+                      WARNING)
 
             if attempt < total:
                 # Interruptible: shutdown does not wait this out.
@@ -408,11 +434,20 @@ class ConnectionWorker(threading.Thread):
                 # worse than dropping it.
                 logger.warning("%s send of %r failed: %s",
                                self._tag(), command, _describe(exc))
+                self._log(f"Send of {command!r} failed: {_describe(exc)}",
+                          WARNING)
                 return _describe(exc)
             logger.info("%s command issued: %s", self._tag(), command)
+            if self._capture is not None:
+                self._capture.record_tx(self.device_id, command)
 
     def _handle_chunk(self, chunk: bytes) -> None:
+        capture = self._capture
         for line in self._assembler.feed(chunk):
+            if capture is not None:
+                # Every line, before EMCC decides what it means: the log is
+                # the record of what the device said, not of what EMCC used.
+                capture.record_rx(self.device_id, line)
             message = parse_line(line)
 
             if message.kind is MessageKind.PZT_TEMPERATURE:

@@ -31,11 +31,29 @@ python main.py --verbose                 # DEBUG logging
 python main.py --config other.json       # alternate config
 ```
 
-Requires Python 3.10+, `customtkinter` and `pillow`:
+Requires Python 3.10+, `customtkinter`, `pillow` and `openpyxl`:
 
 ```bash
-pip install customtkinter pillow
+pip install customtkinter pillow openpyxl
 ```
+
+`openpyxl` writes the device logs as Excel workbooks. Without it EMCC still
+runs and still logs, saving each hour as a CSV file instead.
+
+### Device logs
+
+Each device's **Log** button (List and Dashboard) records everything that
+device sends, the commands EMCC sends it and its connection events, into
+`logs\devices\<device name>\<YYYY-MM-DD>\<YYYY-MM-DD_HHMM>_log.xlsx` — one
+folder per device, one file per hour, the same layout and columns as PyGUI's
+logs. Every device starts with logging off.
+
+**Settings** sets the level for all logged devices: *Full logs*, *Reduced
+logs* (repeating readings only when they change, repeats folded into a count)
+or *Important only* (errors, warnings, device triggers and connection
+context). Logs are deleted after 30 days, or oldest first past 10 GB
+(`log_retention_days`, `log_max_gb` in `config.json`). An hour interrupted by
+a crash or power cut is rebuilt from its journal on the next start.
 
 Because the launcher uses `pythonw.exe`, a startup failure is silent. If
 double-clicking does nothing, run `python main.py` from this folder to see the
@@ -152,6 +170,7 @@ Observed live on the bench, and correct behaviour on EMCC's part:
 main.py                    entrypoint: logging → config → UI
 config.json                settings + persisted devices (created on first run)
 logs/emcc.log              rotating, 5 MB × 5
+logs/devices/              per-device hourly logs (Log button)
 
 emcc/backend/              no Tk in here; testable without a display
   protocol.py              verified wire constants, line assembly, parsing

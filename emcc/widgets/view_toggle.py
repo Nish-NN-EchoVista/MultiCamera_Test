@@ -1,4 +1,4 @@
-"""The List / Dashboard segmented control.
+"""The List / Dashboard / Settings segmented control.
 
 CustomTkinter ships `CTkSegmentedButton`, but it is not used anywhere in this
 app and its hover, radius and icon handling do not match the rest of the
@@ -8,9 +8,10 @@ paint/layout split documented at the top of `buttons.py` -- `_paint()` for
 colours only, `render()` for colours plus geometry, and hover calling
 `_paint()` alone so a pointer move never touches the layout.
 
-The two glyphs are drawn on a local canvas rather than added to `icons.py`.
-They are 12px primitives (three rules; four squares) with no shared use, and
-keeping them here means the control is one self-contained file.
+The three glyphs are drawn on a local canvas rather than added to
+`icons.py`. They are 12px primitives (three rules; four squares; three
+sliders) with no shared use, and keeping them here means the control is one
+self-contained file.
 """
 
 from __future__ import annotations
@@ -22,13 +23,14 @@ import customtkinter as ctk
 from .. import fonts, theme
 from .interactive import Interactive
 
-#: Identifiers for the two views. `App` stores one of these.
+#: Identifiers for the views. `App` stores one of these.
 LIST = "list"
 DASHBOARD = "dashboard"
+SETTINGS = "settings"
 
 
 class _Glyph(ctk.CTkFrame):
-    """A 12x12 canvas holding either the list or the grid mark."""
+    """A 12x12 canvas holding the list, grid or settings mark."""
 
     SIZE = 12
 
@@ -58,6 +60,14 @@ class _Glyph(ctk.CTkFrame):
             # Three rules, 2px tall, at y = 1, 5, 9.
             for y in (1, 5, 9):
                 self._canvas.create_rectangle(0, y, self.SIZE, y + 1,
+                                              fill=colour, outline="")
+        elif self._kind == SETTINGS:
+            # Three sliders: a 1px rule each, with a 3x3 knob at a different
+            # position on each, at y = 1, 5, 9.
+            for y, knob in ((1, 7), (5, 2), (9, 5)):
+                self._canvas.create_rectangle(0, y + 1, self.SIZE, y + 1,
+                                              fill=colour, outline="")
+                self._canvas.create_rectangle(knob, y, knob + 2, y + 2,
                                               fill=colour, outline="")
         else:
             # Four 5x5 squares with a 2px gutter.
@@ -124,7 +134,7 @@ class _Segment(ctk.CTkFrame):
 
 
 class ViewToggle(ctk.CTkFrame):
-    """Two-segment selector for the List and Dashboard views.
+    """Three-segment selector for the List, Dashboard and Settings views.
 
     `on_change(view)` fires only on a genuine change, so re-clicking the
     active segment is a no-op rather than a view rebuild.
@@ -144,9 +154,12 @@ class ViewToggle(ctk.CTkFrame):
             LIST: _Segment(row, LIST, "List", lambda: self._select(LIST)),
             DASHBOARD: _Segment(row, DASHBOARD, "Dashboard",
                                 lambda: self._select(DASHBOARD)),
+            SETTINGS: _Segment(row, SETTINGS, "Settings",
+                               lambda: self._select(SETTINGS)),
         }
         self._segments[LIST].pack(side="left")
         self._segments[DASHBOARD].pack(side="left", padx=(3, 0))
+        self._segments[SETTINGS].pack(side="left", padx=(3, 0))
 
         self._sync()
 

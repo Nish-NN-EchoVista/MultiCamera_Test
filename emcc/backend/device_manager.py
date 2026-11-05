@@ -23,6 +23,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .capture import DeviceCapture, LogLevel
 from .config_manager import ConfigManager, DeviceConfig
 from .connection_worker import ConnectionWorker
 from .events import ConnectionState, DeviceEvent, EventType
@@ -68,6 +69,10 @@ class DeviceState:
     defog_active: bool = False
     latest_temperature: float | None = None
     temperature_alert: bool = False
+    #: The Log button. Runtime only, never saved: every device starts with
+    #: logging off. Survives disconnect and reconnect -- the log simply has
+    #: nothing to record while the link is down.
+    logging_enabled: bool = False
     #: Set while the AdapterController is in cooldown lockout. Hardware refuses
     #: to run sequences in this state, so Clean is pointless until it clears.
     thermal_lockout: bool = False
@@ -108,8 +113,12 @@ class DeviceManager:
         schedule: ScheduleFn,
         cancel: CancelFn,
         on_device_changed: Callable[[str], None] | None = None,
+        capture: DeviceCapture | None = None,
     ):
         self.config = config
+        #: The device log, or None (tests, and anything built without one):
+        #: the Log button still toggles, there is just nowhere to write.
+        self.capture = capture
         #: Taken at construction, not assigned afterwards. Replaces a class
         #: attribute defaulted to `None`: a slot filled by exactly one
         #: statement elsewhere, with nothing requiring that statement to run.
@@ -171,6 +180,8 @@ class DeviceManager:
             worker.join(timeout=2.0)
             if worker.is_alive():
                 logger.warning("%s worker did not stop within 2s", state.name)
+        if state.logging_enabled and self.capture is not None:
+            self.capture.disable(device_id)
 
         self.config.remove_device(device_id)
         logger.info("device removed: %s [%s]", state.name, state.ip or "no IP")
@@ -183,6 +194,7 @@ class DeviceManager:
         worker = self._workers.get(device_id)
         if worker is not None:
             worker.rename(name)
+        self._refresh_log_folders()
         self.config.request_save()
 
     def set_ip(self, device_id: str, ip: str) -> None:
@@ -190,6 +202,7 @@ class DeviceManager:
         if state is None:
             return
         state.config.ip_address = ip.strip()
+        self._refresh_log_folders()
         self.config.request_save()
 
     # ------------------------------------------------------------------
@@ -253,6 +266,7 @@ class DeviceManager:
             ip_address=state.ip,
             settings=self.config.settings,
             events=self.events,
+            capture=self.capture,
         )
         with self._lock:
             self._workers[state.id] = worker
@@ -276,6 +290,69 @@ class DeviceManager:
     def _detach_worker(self, device_id: str) -> ConnectionWorker | None:
         with self._lock:
             return self._workers.pop(device_id, None)
+
+    # ------------------------------------------------------------------
+    # Device logs
+    # ------------------------------------------------------------------
+
+    @property
+    def log_level(self) -> LogLevel:
+        return LogLevel.parse(self.config.settings.log_level)
+
+    def set_log_level(self, level: LogLevel | str) -> None:
+        """Set the level for every device's log, and save it."""
+        level = LogLevel.parse(level)
+        if self.config.settings.log_level == level.value:
+            return
+        self.config.settings.log_level = level.value
+        self.config.request_save()
+        if self.capture is not None:
+            self.capture.set_level(level)
+        logger.info("device log level set to %s", level.label)
+
+    def toggle_logging(self, device_id: str) -> bool:
+        """The Log button. Returns whether the device is now being logged."""
+        state = self._devices.get(device_id)
+        if state is None or self._shutting_down:
+            return False
+        state.logging_enabled = not state.logging_enabled
+        if self.capture is not None:
+            if state.logging_enabled:
+                self.capture.enable(device_id, self.log_folder(device_id))
+            else:
+                self.capture.disable(device_id)
+        logger.info("%s logging %s", state.name or state.ip or device_id,
+                    "started" if state.logging_enabled else "stopped")
+        return state.logging_enabled
+
+    def log_folder(self, device_id: str) -> str:
+        """The folder a device logs into: its name, made unique.
+
+        The name is what an operator looks for, but names are editable and
+        need not be unique -- two devices called "Camera 1" would share a
+        folder. So a duplicate name gets the IP (or, with no IP, a short id)
+        appended. A device with no name logs under its IP.
+        """
+        state = self._devices[device_id]
+        name = state.name.strip()
+        if not name:
+            return state.ip or f"Device {device_id[:8]}"
+        clash = any(other.id != device_id
+                    and other.name.strip().lower() == name.lower()
+                    for other in self._devices.values())
+        return f"{name} ({state.ip or device_id[:8]})" if clash else name
+
+    def _refresh_log_folders(self) -> None:
+        """Re-point every logged device after a rename or IP change.
+
+        Every device, not only the one edited: renaming one device to match
+        another changes the other one's folder too.
+        """
+        if self.capture is None:
+            return
+        for state in self._devices.values():
+            if state.logging_enabled:
+                self.capture.rename(state.id, self.log_folder(state.id))
 
     # ------------------------------------------------------------------
     # Commands
@@ -671,6 +748,7 @@ class DeviceManager:
 
         if not workers:
             logger.info("shutdown: no active connections")
+            self._close_capture()
             return
 
         logger.info("shutdown: stopping %d worker(s)", len(workers))
@@ -694,3 +772,14 @@ class DeviceManager:
                            len(stuck), ", ".join(stuck))
         else:
             logger.info("shutdown: all workers stopped cleanly")
+        # After the workers, so their last lines are in the logs.
+        self._close_capture()
+
+    def _close_capture(self, timeout_s: float = 5.0) -> None:
+        """Save the open hour of every logged device, bounded.
+
+        Whatever is not saved in time is kept as a journal and rebuilt on the
+        next start -- see `DeviceCapture.close`.
+        """
+        if self.capture is not None:
+            self.capture.close(timeout=timeout_s)

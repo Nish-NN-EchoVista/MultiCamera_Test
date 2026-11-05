@@ -62,6 +62,17 @@ class Settings:
     #: operator toggles Auto first -- see DeviceManager.
     auto_reset_delay_s: float = 2.0
 
+    #: Device log level, chosen in the Settings view: "full", "reduced" or
+    #: "important". Anything else reads as the default -- see
+    #: `capture.levels.LogLevel.parse`. Which devices are logged is not
+    #: saved: every device starts with its Log button off.
+    log_level: str = "reduced"
+    #: Device logs are deleted after this many days, and oldest-first once
+    #: they pass `log_max_gb`. Today's logs and unsaved hours are never
+    #: deleted. At Full logs one device writes ~2 MB an hour.
+    log_retention_days: int = 30
+    log_max_gb: float = 10.0
+
     #: Where the PyGUI diagnostic tool lives, for the temperature hand-off.
     #: An absolute bench path as the default is deliberate -- this is
     #: site-specific rather than derivable -- and it is overridable in

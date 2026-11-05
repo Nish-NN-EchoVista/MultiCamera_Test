@@ -9,15 +9,16 @@ Layout, from src/App.tsx:
       VSep
       Section "Connection"   w-[162px]   ConnectionButton, inner px-4
       VSep
-      Section "Actions"      flex-1      Clean + Auto, inner px-5, gap-2
+      Section "Actions"      flex-1      Clean Deice Defog Auto Log, centred
       VSep
       Section "Temperature"  w-[148px]   TempButton, inner pl-4
 
 Faithfulness notes:
 
-* The section *labels* sit flush to each column's left edge while the controls
-  below them are inset by the inner px-4 / px-5 / pl-4. That asymmetry is in
-  the export, so it is reproduced rather than tidied up.
+* The section *labels* are centred over their columns. The export set them
+  flush left, which this reproduced until the operator's mock-up of
+  2026-11-05 asked for them centred, along with the action buttons as one
+  centred group of equal-width buttons.
 * `shadow-[0_2px_16px_rgba(0,0,0,0.35)]` on the card is dropped -- Tk has no
   box-shadow. On the near-black background it contributes very little.
 * The remove control occupies the slot the decorative pencil had, inside the
@@ -44,6 +45,7 @@ from .buttons import (
     ConnectionButton,
     DefogButton,
     DeiceButton,
+    LogButton,
     TempButton,
 )
 from .canvas_util import scaling
@@ -84,7 +86,7 @@ class _Section(ctk.CTkFrame):
             text=fonts.tracked(label.upper(), LABEL_TRACKING),
             font=fonts.sans(9.5, 600),
             text_color=theme.TEXT_LABEL,
-            anchor="w",
+            anchor="center",
             height=13,
         ).pack(fill="x")
 
@@ -143,6 +145,7 @@ class DeviceCard(ctk.CTkFrame):
         on_remove: Callable[[str], None],
         on_rename: Callable[[str, str], None],
         on_ip_change: Callable[[str, str], None],
+        on_log: Callable[[str], None] | None = None,
         label_offset: float | None = None,
     ):
         super().__init__(
@@ -168,6 +171,7 @@ class DeviceCard(ctk.CTkFrame):
         self._on_remove = on_remove
         self._on_rename = on_rename
         self._on_ip_change = on_ip_change
+        self._on_log = on_log or (lambda _device_id: None)
 
         # px-5, and items-center within the 142px min height.
         row = ctk.CTkFrame(self, fg_color="transparent")
@@ -210,6 +214,7 @@ class DeviceCard(ctk.CTkFrame):
         self._deice.render()
         self._defog.render()
         self._auto.render()
+        self._log.render()
         self._temp.render()
 
     def align_labels(self) -> float | None:
@@ -346,30 +351,47 @@ class DeviceCard(ctk.CTkFrame):
         section = self._section(parent, "Actions")
         section.pack(side="left", fill="both", expand=True)  # flex-1
 
+        # Packed without `fill`, so the group sits in the middle of the
+        # column however wide the window makes it.
         wrap = ctk.CTkFrame(section.body, fg_color="transparent")
-        wrap.pack(fill="x", padx=20)  # inner px-5
+        wrap.pack()
+
+        # One width for every button with a word in it, so the words line up
+        # down the list and each sits in the middle of its button. Auto keeps
+        # its natural width: its pill is part of it.
+        width = theme.ACTION_W
 
         self._clean = CleanButton(
-            wrap, self.device, lambda: self._on_clean(self.device_id)
+            wrap, self.device, lambda: self._on_clean(self.device_id),
+            width=width,
         )
         self._clean.pack(side="left")
 
         # Deice and Defog sit between Clean and Auto, so the row reads
         # momentary-then-toggle twice over rather than mixing the two kinds.
         self._deice = DeiceButton(
-            wrap, self.device, lambda: self._on_deice(self.device_id)
+            wrap, self.device, lambda: self._on_deice(self.device_id),
+            width=width,
         )
-        self._deice.pack(side="left", padx=(8, 0))  # gap-2
+        self._deice.pack(side="left", padx=(theme.ACTION_GAP, 0))  # gap-2
 
         self._defog = DefogButton(
-            wrap, self.device, lambda: self._on_defog(self.device_id)
+            wrap, self.device, lambda: self._on_defog(self.device_id),
+            width=width,
         )
-        self._defog.pack(side="left", padx=(8, 0))  # gap-2
+        self._defog.pack(side="left", padx=(theme.ACTION_GAP, 0))  # gap-2
 
         self._auto = AutoButton(
             wrap, self.device, lambda: self._on_auto(self.device_id)
         )
-        self._auto.pack(side="left", padx=(8, 0))  # gap-2
+        self._auto.pack(side="left", padx=(theme.ACTION_GAP, 0))  # gap-2
+
+        # Last, after the operating controls: it records what they do.
+        self._log = LogButton(
+            wrap, self.device, lambda: self._on_log(self.device_id),
+            width=width,
+        )
+        self._log.pack(side="left", padx=(theme.ACTION_GAP, 0))
 
     def _build_temperature(self, parent) -> None:
         section = self._section(parent, "Temperature", theme.COL_TEMP)
